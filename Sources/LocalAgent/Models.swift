@@ -76,6 +76,9 @@ struct ResourceSnapshot: Sendable {
     var systemUsedBytes: UInt64 = 0
     var physicalBytes: UInt64 = ProcessInfo.processInfo.physicalMemory
     var history: [Double] = []
+    var cpuUsage: Double = 0
+    var gpuUsage: Double? = nil
+    var thermalState = "정상"
 }
 
 struct LocalModel: Identifiable, Hashable {

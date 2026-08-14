@@ -50,7 +50,7 @@ struct ContentView: View {
             .background(Color(nsColor: .textBackgroundColor).opacity(0.42))
             if inspectorVisible {
                 Divider()
-                ActivityInspector(model: model).frame(width: 300)
+                ActivityInspector(model: model).frame(width: 320)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -188,8 +188,8 @@ struct ContentView: View {
                         Color.clear.frame(height: 1).id("conversation-bottom")
                     }
                     .padding(.vertical, 28)
-                    .frame(maxWidth: 760)
-                    .padding(.horizontal, 48)
+                    .frame(maxWidth: 1_020)
+                    .padding(.horizontal, 36)
                     .frame(maxWidth: .infinity)
                 }
             }.onChange(of: model.store.selected?.messages.count) { _, _ in
@@ -391,6 +391,15 @@ private struct ResourcePanel: View {
             }
             MemoryGraph(values: snapshot.history)
                 .frame(height: 42)
+            HStack(spacing: 18) {
+                utilization("CPU", snapshot.cpuUsage, .blue)
+                utilization("GPU", snapshot.gpuUsage, .purple)
+            }
+            HStack {
+                Label("온도 상태", systemImage: "thermometer.medium").foregroundStyle(.secondary)
+                Spacer()
+                Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
+            }.font(.system(size: 13))
             VStack(spacing: 7) {
                 resourceRow("모델 프로세스", snapshot.modelBytes, .purple)
                 resourceRow("Opium", snapshot.appBytes, .blue)
@@ -424,6 +433,17 @@ private struct ResourcePanel: View {
             }
         }
         .padding(16)
+    }
+
+    private func utilization(_ title: String, _ value: Double?, _ color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(title).foregroundStyle(.secondary)
+                Spacer()
+                Text(value.map { "\(Int($0 * 100))%" } ?? "—").monospacedDigit()
+            }
+            ProgressView(value: value ?? 0).tint(color)
+        }.font(.system(size: 13)).frame(maxWidth: .infinity)
     }
 
     private func resourceRow(_ title: String, _ value: UInt64, _ color: Color) -> some View {
@@ -476,8 +496,11 @@ private struct MessageView: View {
                     DisclosureGroup("생각 과정") { Text(reasoning).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption)
                 }
                 MarkdownMessageView(markdown: message.content.isEmpty ? " " : message.content)
-                    .padding(message.role == .user ? 13 : 0)
+                    .padding(.horizontal, message.role == .user ? 16 : 0)
+                    .padding(.vertical, message.role == .user ? 13 : 0)
                     .background(message.role == .user ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 16))
+                    .frame(maxWidth: message.role == .user ? 720 : .infinity,
+                           alignment: message.role == .user ? .trailing : .leading)
                 if let attachments = message.attachments, !attachments.isEmpty {
                     HStack { ForEach(attachments) { Label("\($0.name) · \($0.formattedSize)", systemImage: "doc.text").font(.caption) } }
                 }
@@ -504,7 +527,8 @@ private struct MessageView: View {
                     }
                     .padding(10).background(.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                 }
-            }.frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
         }
     }
 }
@@ -514,7 +538,7 @@ private struct MarkdownMessageView: View {
     private var blocks: [MarkdownBlock] { MarkdownBlock.parse(markdown) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let text):
@@ -537,7 +561,7 @@ private struct MarkdownMessageView: View {
                 }
             }
         }
-        .font(.system(size: 16)).lineSpacing(5).textSelection(.enabled)
+        .font(.system(size: 16.5)).lineSpacing(6).textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

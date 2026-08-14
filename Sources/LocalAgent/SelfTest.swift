@@ -76,6 +76,7 @@ enum SelfTest {
         precondition(FileTools.securityLevel(for: .init(id: "shell", name: "run_command", arguments: "{}")) == .critical)
         let serverCall = PendingToolCall(id: "server", name: "run_command", arguments: #"{"command":"python3 -m http.server 8000 & open -a Safari http://localhost:8000","working_directory":"/tmp"}"#)
         precondition(FileTools.liveTitle(for: serverCall) == "로컬 서버를 시작하고 Safari에서 여는 중")
+        precondition(ResourceMonitor.gpuUsage(from: #""PerformanceStatistics" = {"Device Utilization %"=73}"#) == 0.73)
 
         let pluginRoot = directory.appending(path: "sample-plugin")
         let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")
