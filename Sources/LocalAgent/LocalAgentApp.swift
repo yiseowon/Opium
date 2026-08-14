@@ -163,19 +163,22 @@ struct ContentView: View {
                             .transition(.opacity)
                         }
                         if let activity = model.inlineActivity {
-                            HStack(spacing: 10) {
-                                ProgressView().controlSize(.small)
-                                Image(systemName: activity.symbol).foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(activity.title).font(.system(size: 14, weight: .medium))
-                                    if let detail = activity.detail, !detail.isEmpty {
-                                        Text(detail).font(.system(size: 12, design: .monospaced))
-                                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                            TimelineView(.periodic(from: .now, by: 0.2)) { context in
+                                HStack(spacing: 10) {
+                                    ProgressView().controlSize(.small)
+                                    Image(systemName: activity.symbol).foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("\(activity.title)  ·  \(context.date.timeIntervalSince(activity.date), format: .number.precision(.fractionLength(1)))초")
+                                            .font(.system(size: 14, weight: .medium)).foregroundStyle(.secondary)
+                                        if let detail = activity.detail, !detail.isEmpty {
+                                            Text(detail).font(.system(size: 12, design: .monospaced))
+                                                .foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                                        }
                                     }
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        if model.llama.isGenerating {
+                        if model.llama.isGenerating, model.inlineActivity == nil {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
                                 MetricsView(metrics: model.liveMetrics)
@@ -309,7 +312,10 @@ private struct ActivityInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("활동").font(.headline)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("보안 활동").font(.headline)
+                    Text("모델이 이 Mac에서 수행한 작업").font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if model.llama.isGenerating { ProgressView().controlSize(.small) }
             }.padding(16)
@@ -323,13 +329,25 @@ private struct ActivityInspector: View {
                     } else {
                         ForEach(model.activities.reversed()) { activity in
                             HStack(alignment: .top, spacing: 10) {
-                                Image(systemName: activity.symbol)
-                                    .foregroundStyle(activity.isActive ? Color.accentColor : .secondary)
+                                Image(systemName: activity.securityLevel == nil ? activity.symbol : "shield.fill")
+                                    .foregroundStyle(activity.securityLevel.map(securityColor) ?? (activity.isActive ? Color.accentColor : Color.secondary))
                                     .frame(width: 18)
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(activity.title).font(.system(size: 15, weight: .medium))
+                                    HStack(spacing: 6) {
+                                        Text(activity.title).font(.system(size: 15, weight: .medium))
+                                        if let level = activity.securityLevel {
+                                            Text(level.title).font(.system(size: 10, weight: .semibold))
+                                                .foregroundStyle(securityColor(level))
+                                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                                .background(securityColor(level).opacity(0.12), in: Capsule())
+                                        }
+                                    }
                                     if let detail = activity.detail, !detail.isEmpty {
                                         Text(detail).font(.system(size: 13)).foregroundStyle(.secondary)
+                                            .lineLimit(2).truncationMode(.middle)
+                                    }
+                                    if let outcome = activity.outcome, !outcome.isEmpty {
+                                        Text(outcome).font(.system(size: 12)).foregroundStyle(.secondary)
                                             .lineLimit(2).truncationMode(.middle)
                                     }
                                     Text(activity.date, style: .time).font(.system(size: 12)).foregroundStyle(.tertiary)
@@ -347,6 +365,14 @@ private struct ActivityInspector: View {
             ResourcePanel(model: model)
         }
         .background(Color(nsColor: .windowBackgroundColor).opacity(0.72))
+    }
+
+    private func securityColor(_ level: SecurityLevel) -> Color {
+        switch level {
+        case .normal: .green
+        case .sensitive: .orange
+        case .critical: .red
+        }
     }
 }
 

@@ -2,6 +2,25 @@ import AppKit
 import Foundation
 
 enum FileTools {
+    static func securityLevel(for call: PendingToolCall, workspace: String? = nil) -> SecurityLevel {
+        if call.name == "run_command" || call.name == "trash_file" { return .critical }
+        if call.name == "search_mail" || call.name == "fetch_url" { return .sensitive }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let workspacePath = workspace.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let critical = ["/.ssh", "/.gnupg", "/Library/Keychains", "/Library/Mail", "/Library/Messages"]
+        let sensitive = ["/Desktop", "/Documents", "/Downloads", "/Pictures", "/Movies", "/Music", "/Library"]
+        for path in paths(in: call, workspace: workspace).map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) {
+            if let workspacePath, path == workspacePath || path.hasPrefix(workspacePath + "/") { continue }
+            if critical.contains(where: { path == home + $0 || path.hasPrefix(home + $0 + "/") })
+                || ["/System", "/Library", "/private", "/etc"].contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+                return .critical
+            }
+            if sensitive.contains(where: { path == home + $0 || path.hasPrefix(home + $0 + "/") }) { return .sensitive }
+            if !path.hasPrefix(home + "/") && path != home { return .critical }
+        }
+        return .normal
+    }
+
     static func requiresApproval(_ name: String) -> Bool {
         ["write_file", "create_directory", "move_file", "trash_file", "run_command"].contains(name)
     }
@@ -19,6 +38,25 @@ enum FileTools {
         case "fetch_url": return ("웹페이지 읽기", arguments["url"] ?? "웹", "페이지 내용을 읽고 변경하지 않습니다.")
         default: return (call.name, target.isEmpty ? call.arguments : target, "이 작업을 실행합니다.")
         }
+    }
+
+    static func liveTitle(for call: PendingToolCall) -> String {
+        let arguments = decodedArguments(call.arguments)
+        guard call.name == "run_command" else {
+            return ["read_file": "파일 읽는 중", "list_files": "폴더 확인 중", "search_files": "파일 검색 중",
+                    "write_file": "파일 수정 중", "create_directory": "폴더 생성 중", "move_file": "파일 이동 중",
+                    "trash_file": "휴지통으로 이동 중", "search_mail": "메일 검색 중",
+                    "fetch_url": "웹페이지 확인 중"][call.name] ?? "도구 실행 중"
+        }
+
+        let command = (arguments["command"] ?? "").lowercased()
+        let server = command.contains("http.server") || command.contains("python -m http")
+        let safari = command.contains("safari") || command.contains("open http")
+        let stopping = command.contains("pkill") || command.contains("kill ") || command.contains("killall")
+        if server && safari { return stopping ? "로컬 서버를 종료하고 Safari를 정리하는 중" : "로컬 서버를 시작하고 Safari에서 여는 중" }
+        if server { return stopping ? "로컬 서버 종료 중" : "로컬 서버 시작 중" }
+        if safari { return command.contains("close") || command.contains("quit") ? "Safari 창 닫는 중" : "Safari에서 여는 중" }
+        return "터미널 명령 실행 중"
     }
 
     static func changeStat(for call: PendingToolCall, workspace: String? = nil) -> FileChangeStat? {

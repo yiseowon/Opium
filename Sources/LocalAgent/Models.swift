@@ -58,6 +58,16 @@ struct AgentActivity: Identifiable, Hashable, Sendable {
     let symbol: String
     let date = Date()
     var isActive = false
+    var securityLevel: SecurityLevel? = nil
+    var outcome: String? = nil
+}
+
+enum SecurityLevel: Int, Codable, Hashable, Sendable {
+    case normal = 1
+    case sensitive = 2
+    case critical = 3
+
+    var title: String { "레벨 \(rawValue)" }
 }
 
 struct ResourceSnapshot: Sendable {

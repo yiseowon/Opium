@@ -88,8 +88,6 @@ final class AgentViewModel {
                         progress: visibleProgress.isEmpty ? progressFallback(for: name) : String(visibleProgress.prefix(240)),
                         metrics: liveMetrics.completionTokens > 0 ? liveMetrics : nil
                     )
-                    setActivity(activityTitle(for: name), detail: FileTools.presentation(for: call).target,
-                                symbol: activitySymbol(for: name), active: false)
                     if permissions.allows(call, workspace: store.selectedWorkspacePath) { automaticCall = call }
                     else { pendingCall = call }
                 case .completed: break
@@ -177,15 +175,18 @@ final class AgentViewModel {
         if let progress = call.progress, !progress.isEmpty {
             store.append(ChatMessage(role: .assistant, content: progress, metrics: call.metrics, isProgress: true))
         }
-        setActivity(activityTitle(for: call.name), detail: FileTools.presentation(for: call).target,
-                    symbol: activitySymbol(for: call.name), active: true)
-        inlineActivity = AgentActivity(title: activityTitle(for: call.name),
+        let activityID = beginToolActivity(call, workspace: workspace)
+        inlineActivity = AgentActivity(title: FileTools.liveTitle(for: call),
                                        detail: FileTools.presentation(for: call).target,
                                        symbol: activitySymbol(for: call.name), isActive: true)
         let changeStat = FileTools.changeStat(for: call, workspace: workspace)
         let result: String
         do { result = try await Task.detached { try FileTools.run(call, workspace: workspace) }.value }
-        catch { inlineActivity = nil; throw error }
+        catch {
+            inlineActivity = nil
+            completeToolActivity(activityID, outcome: "실패: \(error.localizedDescription)")
+            throw error
+        }
         try? await Task.sleep(for: .milliseconds(350))
         inlineActivity = nil
         if let changeStat {
@@ -195,10 +196,28 @@ final class AgentViewModel {
         if FileTools.requiresApproval(call.name), call.name != "run_command" {
             for path in FileTools.paths(in: call, workspace: workspace) where !activeChanges.contains(path) { activeChanges.append(path) }
         }
+        completeToolActivity(activityID, outcome: result.components(separatedBy: .newlines).first)
         store.append(ChatMessage(role: .tool, content: "[\(call.name)]\n\(result)",
-                                 reasoning: call.progress,
+                                 reasoning: call.progress, metrics: call.metrics,
                                  toolCallID: call.id, toolName: call.name, toolArguments: call.arguments))
         await generate()
+    }
+
+    private func beginToolActivity(_ call: PendingToolCall, workspace: String) -> UUID {
+        activities.indices.forEach { activities[$0].isActive = false }
+        let activity = AgentActivity(title: FileTools.liveTitle(for: call),
+                                     detail: FileTools.presentation(for: call).target,
+                                     symbol: activitySymbol(for: call.name), isActive: true,
+                                     securityLevel: FileTools.securityLevel(for: call, workspace: workspace))
+        activities.append(activity)
+        if activities.count > 80 { activities.removeFirst(activities.count - 80) }
+        return activity.id
+    }
+
+    private func completeToolActivity(_ id: UUID, outcome: String?) {
+        guard let index = activities.firstIndex(where: { $0.id == id }) else { return }
+        activities[index].isActive = false
+        activities[index].outcome = outcome
     }
 
     private func progressFallback(for tool: String) -> String {
@@ -218,13 +237,6 @@ final class AgentViewModel {
         activities.indices.forEach { activities[$0].isActive = false }
         activities.append(AgentActivity(title: title, detail: detail, symbol: symbol, isActive: active))
         if activities.count > 40 { activities.removeFirst(activities.count - 40) }
-    }
-
-    private func activityTitle(for tool: String) -> String {
-        ["read_file": "파일 읽는 중", "list_files": "폴더 확인 중", "search_files": "파일 검색 중",
-         "write_file": "파일 수정 중", "create_directory": "폴더 생성 중", "move_file": "파일 이동 중",
-         "trash_file": "휴지통으로 이동 중", "run_command": "명령 실행 중", "search_mail": "메일 검색 중",
-         "fetch_url": "웹페이지 확인 중"][tool] ?? "도구 실행 중"
     }
 
     private func activitySymbol(for tool: String) -> String {

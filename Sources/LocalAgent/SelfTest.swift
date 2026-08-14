@@ -67,6 +67,15 @@ enum SelfTest {
                                           metrics: GenerationMetrics(promptTokens: 10, completionTokens: 5,
                                                                      tokensPerSecond: 12, elapsedSeconds: 1))
         precondition(meteredCall.progress == "폴더를 확인합니다." && meteredCall.metrics?.completionTokens == 5)
+        precondition(FileTools.securityLevel(for: .init(id: "safe", name: "read_file", arguments: toolArguments),
+                                             workspace: directory.path) == .normal)
+        let sshArguments = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "path": FileManager.default.homeDirectoryForCurrentUser.appending(path: ".ssh/config").path
+        ]), as: UTF8.self)
+        precondition(FileTools.securityLevel(for: .init(id: "ssh", name: "read_file", arguments: sshArguments)) == .critical)
+        precondition(FileTools.securityLevel(for: .init(id: "shell", name: "run_command", arguments: "{}")) == .critical)
+        let serverCall = PendingToolCall(id: "server", name: "run_command", arguments: #"{"command":"python3 -m http.server 8000 & open -a Safari http://localhost:8000","working_directory":"/tmp"}"#)
+        precondition(FileTools.liveTitle(for: serverCall) == "로컬 서버를 시작하고 Safari에서 여는 중")
 
         let pluginRoot = directory.appending(path: "sample-plugin")
         let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")
