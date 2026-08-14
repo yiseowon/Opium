@@ -2,7 +2,7 @@
 
 Opium은 Mac에서 GGUF 형식의 로컬 LLM을 실행하고, 대화뿐 아니라 파일·터미널·메일·웹 도구를 사용할 수 있도록 만드는 네이티브 macOS 에이전트입니다.
 
-대화와 모델은 사용자의 Mac에서 처리하는 것을 기본으로 합니다. 현재는 초기 개발 버전이며 `Qwen3-Coder-30B-A3B-Instruct`를 중심으로 테스트하고 있습니다.
+대화와 모델은 사용자의 Mac에서 처리하는 것을 기본으로 합니다. 현재는 초기 개발 버전이며 `Qwen3.8-27B`를 중심으로 테스트하고 있습니다.
 
 ![Opium 앱 아이콘](Assets/OpiumIcon.png)
 
@@ -53,6 +53,8 @@ Opium/
 ```
 
 모델 파일은 용량과 배포 조건 때문에 Git에 포함되지 않습니다. Q4 또는 Q5 양자화 모델로 먼저 테스트하는 것을 권장합니다.
+
+48GB Apple Silicon Mac에서는 [`ggml-org/Qwen3.8-27B-GGUF`](https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF)의 `Q4_K_M`을 권장합니다. Opium의 추론 단계는 Qwen3.8의 `low`, `medium`, `xhigh` 사고 강도와 연결됩니다.
 
 ### 3. 실행
 

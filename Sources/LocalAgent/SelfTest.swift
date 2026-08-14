@@ -50,6 +50,13 @@ enum SelfTest {
         let decoded = try JSONDecoder().decode(ChatMessage.self, from: encoded)
         precondition(decoded.attachments?.first?.content == "hello")
 
+        let qwen38 = LocalModel(url: directory.appending(path: "Qwen3.8-27B-Q4_K_M.gguf"))
+        precondition(qwen38.isQwen38 && !qwen38.isAuxiliary && qwen38.identity == "Qwen3.8")
+        precondition(LocalModel(url: directory.appending(path: "mmproj-Qwen3.8-27B-Q8_0.gguf")).isAuxiliary)
+        precondition(LocalModel(url: directory.appending(path: "mtp-Qwen3.8-27B-Q4_0.gguf")).isAuxiliary)
+        precondition(ReasoningEffort.medium.qwenReasoningEffort == "medium")
+        precondition(ReasoningEffort.ultra.qwenReasoningEffort == "xhigh")
+
         let pluginRoot = directory.appending(path: "sample-plugin")
         let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")
         let skillDirectory = pluginRoot.appending(path: "skills/concise")

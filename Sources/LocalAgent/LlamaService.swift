@@ -4,7 +4,13 @@ import Observation
 @MainActor @Observable
 final class LlamaService {
     var models: [LocalModel] = []
-    var selectedModel: LocalModel?
+    var selectedModel: LocalModel? {
+        didSet {
+            if let path = selectedModel?.url.path {
+                UserDefaults.standard.set(path, forKey: "selectedModelPath")
+            }
+        }
+    }
     var status = "중지됨"
     var isRunning = false
     var isGenerating = false
@@ -36,11 +42,17 @@ final class LlamaService {
         let urls = directories.flatMap {
             (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? []
         }
-        models = Array(Set(urls)).filter {
-            $0.pathExtension.lowercased() == "gguf"
-                && !FileManager.default.fileExists(atPath: $0.path + ".aria2")
-        }.map(LocalModel.init).sorted { $0.name < $1.name }
-        if selectedModel == nil { selectedModel = models.first }
+        models = Array(Set(urls)).map(LocalModel.init).filter {
+            $0.url.pathExtension.lowercased() == "gguf"
+                && !$0.isAuxiliary
+                && !FileManager.default.fileExists(atPath: $0.url.path + ".aria2")
+        }.sorted { $0.name < $1.name }
+        let savedPath = UserDefaults.standard.string(forKey: "selectedModelPath")
+        if selectedModel == nil || !models.contains(selectedModel!) {
+            selectedModel = models.first(where: { $0.url.path == savedPath })
+                ?? models.first(where: \.isQwen38)
+                ?? models.first
+        }
     }
 
     func start() async throws {
@@ -92,6 +104,11 @@ final class LlamaService {
                 pluginInstructions: String = "") -> AsyncThrowingStream<ModelEvent, Error> {
         let url = baseURL.appending(path: "v1/chat/completions")
         let modelName = selectedModel?.name ?? "local"
+        let modelIdentity = selectedModel?.identity ?? "the selected local model"
+        var templateOptions: [String: Any] = ["enable_thinking": effort.usesThinking]
+        if effort.usesThinking, selectedModel?.isQwen38 == true {
+            templateOptions["reasoning_effort"] = effort.qwenReasoningEffort
+        }
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -107,7 +124,7 @@ final class LlamaService {
                         "messages": [[
                             "role": "system",
                             "content": """
-                            You are Qwen3-Coder, an autonomous local macOS work agent. Behave like a concise professional coding agent, not a chatty assistant.
+                            You are \(modelIdentity), running as an autonomous local macOS work agent. Behave like a concise professional agent, not a chatty assistant.
 
                             WORKING RULES
                             - For actionable requests, do not announce what you will do. Call the appropriate tool immediately.
@@ -145,11 +162,12 @@ final class LlamaService {
                         },
                         "tools": Self.toolsJSON,
                         "tool_choice": "auto",
+                        "parallel_tool_calls": false,
                         "temperature": 0.1,
                         "top_p": 0.8,
                         "repeat_penalty": 1.08,
                         "max_tokens": effort.maxTokens,
-                        "chat_template_kwargs": ["enable_thinking": effort.usesThinking]
+                        "chat_template_kwargs": templateOptions
                     ])
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -219,7 +237,8 @@ final class LlamaService {
                 ["role": "user", "content": conversation]
             ],
             "temperature": 0.2,
-            "max_tokens": 24
+            "max_tokens": 24,
+            "chat_template_kwargs": ["enable_thinking": false]
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200,

@@ -79,6 +79,12 @@ struct LocalModel: Identifiable, Hashable {
     var quantization: String {
         name.firstMatch(of: /Q\d(?:_[A-Z0-9]+)*/).map { String($0.output) } ?? "GGUF"
     }
+    var isAuxiliary: Bool {
+        let lower = name.lowercased()
+        return lower.hasPrefix("mmproj-") || lower.hasPrefix("mtp-")
+    }
+    var isQwen38: Bool { name.lowercased().contains("qwen3.8") }
+    var identity: String { isQwen38 ? "Qwen3.8" : name }
 }
 
 enum ReasoningEffort: String, CaseIterable, Identifiable, Codable {
@@ -101,6 +107,13 @@ enum ReasoningEffort: String, CaseIterable, Identifiable, Codable {
         }
     }
     var usesThinking: Bool { self != .feather && self != .light }
+    var qwenReasoningEffort: String {
+        switch self {
+        case .feather, .light: "low"
+        case .medium, .high: "medium"
+        case .extraHigh, .ultra: "xhigh"
+        }
+    }
     var instruction: String {
         switch self {
         case .feather: "Respond immediately with the minimum sufficient work."

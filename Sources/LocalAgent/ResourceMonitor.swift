@@ -21,7 +21,7 @@ final class ResourceMonitor {
 
     private func sample(modelPID: Int32?) {
         let app = Self.physicalFootprint(pid: getpid())
-        let model = modelPID.map(Self.physicalFootprint(pid:)) ?? 0
+        let model = modelPID.map(Self.residentBytes(pid:)) ?? 0
         let used = Self.systemUsedBytes()
         var history = snapshot.history
         history.append(Double(used) / Double(max(ProcessInfo.processInfo.physicalMemory, 1)))
@@ -29,8 +29,17 @@ final class ResourceMonitor {
         snapshot = ResourceSnapshot(appBytes: app, modelBytes: model, systemUsedBytes: used, history: history)
     }
 
-    // Activity Monitor's per-process "Memory" column uses physical footprint,
-    // not RSS. This includes compressed/private memory without double-counting mappings.
+    // llama.cpp memory-maps GGUF weights. Resident size includes those pages while
+    // physical footprint omits most of them and severely under-reports model memory.
+    private static func residentBytes(pid: Int32) -> UInt64 {
+        var info = proc_taskinfo()
+        let size = MemoryLayout<proc_taskinfo>.stride
+        let result = withUnsafeMutablePointer(to: &info) {
+            proc_pidinfo(pid, PROC_PIDTASKINFO, 0, $0, Int32(size))
+        }
+        return result == size ? info.pti_resident_size : 0
+    }
+
     private static func physicalFootprint(pid: Int32) -> UInt64 {
         var info = rusage_info_v4()
         let result = withUnsafeMutablePointer(to: &info) {
