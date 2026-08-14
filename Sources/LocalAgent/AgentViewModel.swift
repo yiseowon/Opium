@@ -80,6 +80,12 @@ final class AgentViewModel {
                     finalMetrics.thinkingSeconds = liveMetrics.thinkingSeconds
                     liveMetrics = finalMetrics
                     store.updateLastAssistant(metrics: finalMetrics)
+                case .toolCallProgress(let name, let arguments):
+                    guard name == "write_file",
+                          let stat = FileTools.liveChangeStat(arguments: arguments,
+                                                             workspace: store.selectedWorkspacePath) else { break }
+                    activeChangeStats.removeAll { $0.path == stat.path }
+                    activeChangeStats.append(stat)
                 case .toolCall(let id, let name, let arguments):
                     issuedToolCall = true
                     let visibleProgress = stepProgress.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -33,6 +33,9 @@ enum SelfTest {
         let updateCall = PendingToolCall(id: "diff", name: "write_file", arguments: updateArguments)
         let stat = FileTools.changeStat(for: updateCall, workspace: directory.path)
         precondition(stat?.additions == 1 && stat?.deletions == 0)
+        let partialArguments = #"{"path":"/workspace/site/assets/app.js","content":"ok\nnext\nthi"#
+        let liveStat = FileTools.liveChangeStat(arguments: partialArguments, workspace: directory.path)
+        precondition(liveStat?.path == nested.path && liveStat?.additions == 2 && liveStat?.deletions == 0)
         let toolArguments = String(decoding: try JSONSerialization.data(withJSONObject: ["path": file.path]), as: UTF8.self)
         let toolPaths = FileTools.paths(in: .init(id: "paths", name: "read_file", arguments: toolArguments))
         precondition(toolPaths == [file.path])

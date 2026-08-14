@@ -1,6 +1,10 @@
 import AppKit
 import SwiftUI
 
+extension Color {
+    static let opiumPurple = Color(red: 0.48, green: 0.38, blue: 0.96)
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var service: LlamaService?
     func applicationWillTerminate(_ notification: Notification) { service?.stop() }
@@ -154,7 +158,7 @@ struct ContentView: View {
                         }
                         if model.llama.isStarting {
                             HStack(spacing: 10) {
-                                ProgressView().controlSize(.small)
+                                OpiumLoader()
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("모델 로드 중").font(.system(size: 15, weight: .medium))
                                     Text(model.llama.selectedModel?.displayName ?? "로컬 모델")
@@ -167,7 +171,7 @@ struct ContentView: View {
                         if let activity = model.inlineActivity {
                             TimelineView(.periodic(from: .now, by: 0.2)) { context in
                                 HStack(spacing: 10) {
-                                    ProgressView().controlSize(.small)
+                                    OpiumLoader()
                                     Image(systemName: activity.symbol).foregroundStyle(.secondary)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("\(activity.title)  ·  \(context.date.timeIntervalSince(activity.date), format: .number.precision(.fractionLength(1)))초")
@@ -177,12 +181,13 @@ struct ContentView: View {
                                                 .foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                                         }
                                     }
+                                    if !model.activeChangeStats.isEmpty { ChangeCountView(stats: model.activeChangeStats) }
                                 }
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
                         if model.llama.isGenerating, model.inlineActivity == nil {
                             HStack(spacing: 8) {
-                                ProgressView().controlSize(.small)
+                                OpiumLoader()
                                 MetricsView(metrics: model.liveMetrics)
                                 if !model.activeChangeStats.isEmpty { ChangeCountView(stats: model.activeChangeStats) }
                             }
@@ -201,6 +206,8 @@ struct ContentView: View {
             }.onChange(of: model.store.selected?.messages.last?.reasoning) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }.onChange(of: model.inlineActivity?.id) { _, _ in
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }.onChange(of: model.activeChangeStats) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }.frame(maxWidth: .infinity)
@@ -268,7 +275,7 @@ struct ContentView: View {
                     }
                 } label: { Text(model.llama.effort.rawValue) }
                 Button { Task { await model.send() } } label: {
-                    if model.llama.isStarting { ProgressView().controlSize(.small) }
+                    if model.llama.isStarting { OpiumLoader() }
                     else { Image(systemName: "arrow.up").fontWeight(.semibold) }
                 }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
@@ -314,6 +321,22 @@ private struct OpiumMark: Shape {
     }
 }
 
+private struct OpiumLoader: View {
+    @State private var blooming = false
+
+    var body: some View {
+        OpiumMark()
+            .stroke(Color.opiumPurple, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+            .frame(width: 16, height: 16)
+            .scaleEffect(blooming ? 1 : 0.72)
+            .opacity(blooming ? 1 : 0.35)
+            .shadow(color: .opiumPurple.opacity(blooming ? 0.5 : 0), radius: 5)
+            .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: blooming)
+            .onAppear { blooming = true }
+            .accessibilityLabel("작업 중")
+    }
+}
+
 private struct ActivityInspector: View {
     @Bindable var model: AgentViewModel
 
@@ -325,7 +348,7 @@ private struct ActivityInspector: View {
                     Text("모델이 이 Mac에서 수행한 작업").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if model.llama.isGenerating { ProgressView().controlSize(.small) }
+                if model.llama.isGenerating { OpiumLoader() }
             }.padding(16)
             Divider().opacity(0.5)
             ScrollView {
@@ -401,7 +424,7 @@ private struct ResourcePanel: View {
                 .frame(height: 42)
             HStack(spacing: 18) {
                 utilization("CPU", snapshot.cpuUsage, .blue)
-                utilization("GPU", snapshot.gpuUsage, .purple)
+                utilization("GPU", snapshot.gpuUsage, .opiumPurple)
             }
             HStack {
                 Label("온도 상태", systemImage: "thermometer.medium").foregroundStyle(.secondary)
@@ -409,7 +432,7 @@ private struct ResourcePanel: View {
                 Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
             }.font(.system(size: 13))
             VStack(spacing: 7) {
-                resourceRow("모델 프로세스", snapshot.modelBytes, .purple)
+                resourceRow("모델 프로세스", snapshot.modelBytes, .opiumPurple)
                 resourceRow("Opium", snapshot.appBytes, .blue)
                 if let selected = model.llama.selectedModel {
                     HStack {
@@ -506,10 +529,10 @@ private struct MessageView: View {
                 MarkdownMessageView(markdown: message.content.isEmpty ? " " : message.content)
                     .padding(.horizontal, message.role == .user ? 16 : 0)
                     .padding(.vertical, message.role == .user ? 13 : 0)
-                    .background(message.role == .user ? Color(red: 0.48, green: 0.38, blue: 0.96).opacity(0.17) : .clear,
+                    .background(message.role == .user ? Color.opiumPurple.opacity(0.17) : .clear,
                                 in: RoundedRectangle(cornerRadius: 16))
                     .overlay(RoundedRectangle(cornerRadius: 16)
-                        .stroke(message.role == .user ? Color(red: 0.55, green: 0.45, blue: 1).opacity(0.22) : .clear))
+                        .stroke(message.role == .user ? Color.opiumPurple.opacity(0.28) : .clear))
                     .frame(maxWidth: message.role == .user ? 720 : .infinity,
                            alignment: message.role == .user ? .trailing : .leading)
                 if let attachments = message.attachments, !attachments.isEmpty {
@@ -526,7 +549,7 @@ private struct MessageView: View {
                                     Text(stat.path).font(.system(.caption2, design: .monospaced))
                                         .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                     Spacer()
-                                    ChangeCountView(stats: [stat])
+                                    ChangeCountView(stats: [stat], showsFileName: false)
                                 }
                             }
                         } else {
@@ -675,17 +698,24 @@ private struct CodeBlockView: View {
 
 private struct ChangeCountView: View {
     let stats: [FileChangeStat]
-    private var additions: Int { stats.reduce(0) { $0 + $1.additions } }
-    private var deletions: Int { stats.reduce(0) { $0 + $1.deletions } }
+    var showsFileName = true
 
     var body: some View {
-        HStack(spacing: 5) {
-            Text("+\(additions)").foregroundStyle(.green)
-            Text("-\(deletions)").foregroundStyle(.red)
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(stats) { stat in
+                HStack(spacing: 5) {
+                    if showsFileName {
+                        Text(URL(fileURLWithPath: stat.path).lastPathComponent)
+                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    }
+                    Text("+\(stat.additions)").foregroundStyle(.green)
+                    Text("-\(stat.deletions)").foregroundStyle(.red)
+                }
+                .contentTransition(.numericText())
+                .animation(.snappy, value: stat.additions + stat.deletions)
+            }
         }
         .font(.system(size: 12, weight: .semibold, design: .monospaced))
-        .contentTransition(.numericText())
-        .animation(.snappy, value: additions + deletions)
     }
 }
 
@@ -721,7 +751,7 @@ private struct MetricsView: View {
     var body: some View {
         Text(metricText)
             .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-            .help("입력 \(metrics.promptTokens) 토큰 · 출력 \(metrics.completionTokens) 토큰")
+            .help("총 \(metrics.promptTokens + metrics.completionTokens) 토큰")
     }
 
     private var metricText: String {
@@ -729,7 +759,7 @@ private struct MetricsView: View {
             return "응답 작성 중  ·  \(String(format: "%.1f", metrics.elapsedSeconds))초"
         }
         let thinking = metrics.thinkingSeconds.map { String(format: "%.1f초 생각  ·  ", $0) } ?? ""
-        return "\(thinking)입력 \(metrics.promptTokens.formatted())  ·  출력 \(metrics.completionTokens.formatted())  ·  \(String(format: "%.1f", metrics.tokensPerSecond)) tok/s  ·  \(String(format: "%.1f", metrics.elapsedSeconds))초"
+        return "\(thinking)\((metrics.promptTokens + metrics.completionTokens).formatted()) 토큰  ·  \(String(format: "%.1f", metrics.tokensPerSecond)) tok/s  ·  \(String(format: "%.1f", metrics.elapsedSeconds))초"
     }
 }
 
@@ -748,9 +778,7 @@ private struct PermissionSettingsView: View {
                 Spacer(); Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
             }
             HStack(spacing: 10) {
-                usageCard("입력 토큰", usage.promptTokens)
-                usageCard("출력 토큰", usage.completionTokens)
-                usageCard("전체 토큰", usage.promptTokens + usage.completionTokens)
+                usageCard("지금까지 사용한 토큰", usage.promptTokens + usage.completionTokens)
             }
             Text(modelName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             VStack(alignment: .leading, spacing: 8) {
@@ -787,7 +815,7 @@ private struct PermissionSettingsView: View {
             HStack(spacing: 16) {
                 Label("파일", systemImage: "folder").foregroundStyle(.green)
                 Label("Apple Mail", systemImage: "envelope").foregroundStyle(.blue)
-                Label("웹 읽기/제작", systemImage: "globe").foregroundStyle(.purple)
+                Label("웹 읽기/제작", systemImage: "globe").foregroundStyle(Color.opiumPurple)
             }.font(.caption)
         }.padding(26).frame(width: 600, height: 620)
     }
@@ -832,16 +860,16 @@ private struct PluginDirectoryView: View {
                         ForEach(store.plugins) { plugin in
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(alignment: .top, spacing: 12) {
-                                    RoundedRectangle(cornerRadius: 10).fill(.purple.opacity(0.14))
-                                        .overlay(Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.purple))
+                                    RoundedRectangle(cornerRadius: 10).fill(Color.opiumPurple.opacity(0.14))
+                                        .overlay(Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(Color.opiumPurple))
                                         .frame(width: 44, height: 44)
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack(spacing: 7) {
                                             Text(plugin.displayName).font(.headline)
                                             if plugin.isBuiltIn {
-                                                Text("기본 제공").font(.caption2.weight(.semibold)).foregroundStyle(.purple)
+                                                Text("기본 제공").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
                                                     .padding(.horizontal, 6).padding(.vertical, 3)
-                                                    .background(.purple.opacity(0.12), in: Capsule())
+                                                    .background(Color.opiumPurple.opacity(0.12), in: Capsule())
                                             }
                                         }
                                         Text(plugin.summary).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
@@ -866,7 +894,7 @@ private struct PluginDirectoryView: View {
                                 }
                                 if plugin.isBuiltIn {
                                     Label("Opium 보안 정책과 활동 로그를 통해 항상 안전하게 실행됩니다.", systemImage: "bolt.shield.fill")
-                                        .font(.caption).foregroundStyle(.purple)
+                                        .font(.caption).foregroundStyle(Color.opiumPurple)
                                 } else if plugin.hasMCP || plugin.hasHooks {
                                     Label("MCP와 Hooks는 현재 자동 실행되지 않습니다.", systemImage: "shield.lefthalf.filled")
                                         .font(.caption).foregroundStyle(.orange)

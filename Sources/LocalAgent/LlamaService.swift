@@ -215,6 +215,9 @@ final class LlamaService {
                                 old.name + (function["name"] as? String ?? ""),
                                 old.arguments + (function["arguments"] as? String ?? "")
                             )
+                            if let current = calls[index] {
+                                continuation.yield(.toolCallProgress(name: current.name, arguments: current.arguments))
+                            }
                         }
                     }
                     for call in calls.sorted(by: { $0.key < $1.key }).map(\.value) {

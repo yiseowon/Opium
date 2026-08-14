@@ -169,6 +169,7 @@ enum ModelEvent: Sendable {
     case text(String)
     case reasoning(String)
     case usage(GenerationMetrics)
+    case toolCallProgress(name: String, arguments: String)
     case toolCall(id: String, name: String, arguments: String)
     case completed
 }

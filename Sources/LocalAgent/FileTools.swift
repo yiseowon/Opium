@@ -80,6 +80,48 @@ enum FileTools {
         return FileChangeStat(path: path, additions: additions, deletions: deletions)
     }
 
+    static func liveChangeStat(arguments: String, workspace: String? = nil) -> FileChangeStat? {
+        guard let rawPath = partialJSONString(named: "path", in: arguments, requireClosingQuote: true),
+              let newContent = partialJSONString(named: "content", in: arguments) else { return nil }
+        let path = normalizedPath(rawPath, workspace: workspace)
+        let oldContent = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        let newLines = newContent.isEmpty ? [] : newContent.components(separatedBy: .newlines)
+        let oldLines = oldContent.isEmpty ? [] : oldContent.components(separatedBy: .newlines)
+        let difference = newLines.difference(from: Array(oldLines.prefix(newLines.count)))
+        var additions = 0, deletions = 0
+        for change in difference {
+            if case .insert = change { additions += 1 } else { deletions += 1 }
+        }
+        return FileChangeStat(path: path, additions: additions, deletions: deletions)
+    }
+
+    private static func partialJSONString(named key: String, in json: String,
+                                          requireClosingQuote: Bool = false) -> String? {
+        guard let keyRange = json.range(of: "\"\(key)\"") else { return nil }
+        var index = keyRange.upperBound
+        while index < json.endIndex, json[index].isWhitespace || json[index] == ":" { index = json.index(after: index) }
+        guard index < json.endIndex, json[index] == "\"" else { return nil }
+        index = json.index(after: index)
+        var result = "", escaped = false, closed = false
+        while index < json.endIndex {
+            let character = json[index]
+            index = json.index(after: index)
+            if escaped {
+                switch character {
+                case "n": result.append("\n")
+                case "r": result.append("\r")
+                case "t": result.append("\t")
+                case "\"", "\\", "/": result.append(character)
+                default: result.append(character)
+                }
+                escaped = false
+            } else if character == "\\" { escaped = true }
+            else if character == "\"" { closed = true; break }
+            else { result.append(character) }
+        }
+        return requireClosingQuote && !closed ? nil : result
+    }
+
     static func run(_ call: PendingToolCall, workspace: String? = nil) throws -> String {
         guard let data = call.arguments.data(using: .utf8),
               let arguments = try JSONSerialization.jsonObject(with: data) as? [String: String] else {
