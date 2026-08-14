@@ -17,6 +17,9 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var reasoning: String? = nil
     var attachments: [MessageAttachment]? = nil
     var metrics: GenerationMetrics? = nil
+    var toolCallID: String? = nil
+    var toolName: String? = nil
+    var toolArguments: String? = nil
     var changedFiles: [String]? = nil
     var changeStats: [FileChangeStat]? = nil
     var createdAt = Date()
@@ -130,6 +133,8 @@ struct PendingToolCall: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let arguments: String
+    var progress: String? = nil
+    var metrics: GenerationMetrics? = nil
 }
 
 enum ModelEvent: Sendable {

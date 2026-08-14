@@ -596,10 +596,19 @@ private struct ChangeCountView: View {
 private struct ToolMessageView: View {
     let message: ChatMessage
     var body: some View {
-        DisclosureGroup {
-            Text(message.content).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).padding(.top, 8)
-        } label: {
-            Label(toolTitle, systemImage: "terminal").font(.caption.weight(.medium))
+        VStack(alignment: .leading, spacing: 8) {
+            if let progress = message.reasoning, !progress.isEmpty {
+                Text(progress).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.88))
+                    .lineLimit(2).textSelection(.enabled)
+            }
+            DisclosureGroup {
+                Text(message.content).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).padding(.top, 8)
+            } label: {
+                HStack(spacing: 8) {
+                    Label(toolTitle, systemImage: "terminal").font(.caption.weight(.medium))
+                    if let metrics = message.metrics { MetricsView(metrics: metrics) }
+                }
+            }
         }.foregroundStyle(.secondary).padding(11).background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
 
@@ -628,7 +637,7 @@ private struct MetricsView: View {
             return "응답 작성 중  ·  \(String(format: "%.1f", metrics.elapsedSeconds))초"
         }
         let thinking = metrics.thinkingSeconds.map { String(format: "%.1f초 생각  ·  ", $0) } ?? ""
-        return "\(thinking)\(metrics.completionTokens) 토큰  ·  \(String(format: "%.1f", metrics.tokensPerSecond)) tok/s"
+        return "\(thinking)입력 \(metrics.promptTokens.formatted())  ·  출력 \(metrics.completionTokens.formatted())  ·  \(String(format: "%.1f", metrics.tokensPerSecond)) tok/s  ·  \(String(format: "%.1f", metrics.elapsedSeconds))초"
     }
 }
 

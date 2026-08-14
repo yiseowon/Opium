@@ -49,6 +49,10 @@ enum SelfTest {
         let encoded = try JSONEncoder().encode(ChatMessage(role: .user, content: "read", attachments: [attachment]))
         let decoded = try JSONDecoder().decode(ChatMessage.self, from: encoded)
         precondition(decoded.attachments?.first?.content == "hello")
+        let toolHistory = ChatMessage(role: .tool, content: "result", toolCallID: "call-1",
+                                      toolName: "list_files", toolArguments: #"{"path":"."}"#)
+        let decodedToolHistory = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(toolHistory))
+        precondition(decodedToolHistory.toolCallID == "call-1")
 
         let qwen38 = LocalModel(url: directory.appending(path: "Qwen3.8-27B-Q4_K_M.gguf"))
         precondition(qwen38.isQwen38 && !qwen38.isAuxiliary && qwen38.identity == "Qwen3.8")
@@ -56,6 +60,11 @@ enum SelfTest {
         precondition(LocalModel(url: directory.appending(path: "mtp-Qwen3.8-27B-Q4_0.gguf")).isAuxiliary)
         precondition(ReasoningEffort.medium.qwenReasoningEffort == "medium")
         precondition(ReasoningEffort.ultra.qwenReasoningEffort == "xhigh")
+        let meteredCall = PendingToolCall(id: "metered", name: "list_files", arguments: "{}",
+                                          progress: "폴더를 확인합니다.",
+                                          metrics: GenerationMetrics(promptTokens: 10, completionTokens: 5,
+                                                                     tokensPerSecond: 12, elapsedSeconds: 1))
+        precondition(meteredCall.progress == "폴더를 확인합니다." && meteredCall.metrics?.completionTokens == 5)
 
         let pluginRoot = directory.appending(path: "sample-plugin")
         let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")

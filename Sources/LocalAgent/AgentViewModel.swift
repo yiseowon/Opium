@@ -56,6 +56,7 @@ final class AgentViewModel {
         let startedAt = ContinuousClock.now
         var answerStarted = false
         var issuedToolCall = false
+        var stepProgress = ""
         store.append(ChatMessage(role: .assistant, content: ""))
         var automaticCall: PendingToolCall?
         do {
@@ -63,6 +64,7 @@ final class AgentViewModel {
                                                 pluginInstructions: plugins.enabledInstructions) {
                 switch event {
                 case .text(let text):
+                    stepProgress += text
                     if !answerStarted {
                         answerStarted = true
                         liveMetrics.thinkingSeconds = startedAt.duration(to: .now).seconds
@@ -79,7 +81,12 @@ final class AgentViewModel {
                     store.updateLastAssistant(metrics: finalMetrics)
                 case .toolCall(let id, let name, let arguments):
                     issuedToolCall = true
-                    let call = PendingToolCall(id: id, name: name, arguments: arguments)
+                    let visibleProgress = stepProgress.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let call = PendingToolCall(
+                        id: id, name: name, arguments: arguments,
+                        progress: visibleProgress.isEmpty ? progressFallback(for: name) : String(visibleProgress.prefix(240)),
+                        metrics: liveMetrics.completionTokens > 0 ? liveMetrics : nil
+                    )
                     setActivity(activityTitle(for: name), detail: FileTools.presentation(for: call).target,
                                 symbol: activitySymbol(for: name), active: false)
                     if permissions.allows(call, workspace: store.selectedWorkspacePath) { automaticCall = call }
@@ -177,8 +184,23 @@ final class AgentViewModel {
         if FileTools.requiresApproval(call.name), call.name != "run_command" {
             for path in FileTools.paths(in: call, workspace: workspace) where !activeChanges.contains(path) { activeChanges.append(path) }
         }
-        store.append(ChatMessage(role: .tool, content: "[\(call.name)]\n\(result)"))
+        store.append(ChatMessage(role: .tool, content: "[\(call.name)]\n\(result)",
+                                 reasoning: call.progress, metrics: call.metrics,
+                                 toolCallID: call.id, toolName: call.name, toolArguments: call.arguments))
         await generate()
+    }
+
+    private func progressFallback(for tool: String) -> String {
+        ["read_file": "파일 내용을 확인하고 다음 단계를 결정합니다.",
+         "list_files": "폴더 구성을 확인하고 필요한 작업을 정리합니다.",
+         "search_files": "관련 파일을 찾아 변경 범위를 좁힙니다.",
+         "write_file": "정리한 변경 내용을 파일에 적용합니다.",
+         "create_directory": "작업에 필요한 폴더 구조를 준비합니다.",
+         "move_file": "파일을 요청한 위치로 정리합니다.",
+         "trash_file": "요청한 파일을 복구 가능한 휴지통으로 옮깁니다.",
+         "run_command": "변경 결과를 실행해 오류와 누락을 검증합니다.",
+         "search_mail": "관련 메일을 찾아 필요한 내용을 확인합니다.",
+         "fetch_url": "웹페이지 내용을 확인해 작업에 반영합니다."][tool] ?? "다음 작업에 필요한 정보를 확인합니다."
     }
 
     private func setActivity(_ title: String, detail: String? = nil, symbol: String, active: Bool) {
