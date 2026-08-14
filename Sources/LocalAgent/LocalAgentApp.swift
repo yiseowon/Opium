@@ -134,7 +134,9 @@ struct ContentView: View {
     }
 
     private var messages: some View {
-        ScrollViewReader { proxy in
+        let visibleMessages = ChatMessage.visibleConversation(model.store.selected?.messages ?? [],
+                                                              condenseCurrentTurn: !model.llama.isGenerating)
+        return ScrollViewReader { proxy in
             ScrollView {
                 if model.store.selected?.messages.isEmpty != false {
                     VStack(spacing: 12) {
@@ -144,7 +146,7 @@ struct ContentView: View {
                     }.frame(maxWidth: .infinity, minHeight: 380)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 24) {
-                        ForEach(Array((model.store.selected?.messages ?? []).enumerated()), id: \.element.id) { index, message in
+                        ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
                             if index > 0, message.role == .user {
                                 Divider().opacity(0.45).padding(.vertical, 6)
                             }
@@ -193,6 +195,12 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
                 }
             }.onChange(of: model.store.selected?.messages.count) { _, _ in
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }.onChange(of: model.store.selected?.messages.last?.content) { _, _ in
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }.onChange(of: model.store.selected?.messages.last?.reasoning) { _, _ in
+                proxy.scrollTo("conversation-bottom", anchor: .bottom)
+            }.onChange(of: model.inlineActivity?.id) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }
         }.frame(maxWidth: .infinity)
@@ -492,13 +500,16 @@ private struct MessageView: View {
         if message.role == .tool { ToolMessageView(message: message) }
         else {
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                if let reasoning = message.reasoning, !reasoning.isEmpty {
+                if message.content.isEmpty, let reasoning = message.reasoning, !reasoning.isEmpty {
                     DisclosureGroup("생각 과정") { Text(reasoning).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption)
                 }
                 MarkdownMessageView(markdown: message.content.isEmpty ? " " : message.content)
                     .padding(.horizontal, message.role == .user ? 16 : 0)
                     .padding(.vertical, message.role == .user ? 13 : 0)
-                    .background(message.role == .user ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 16))
+                    .background(message.role == .user ? Color(red: 0.48, green: 0.38, blue: 0.96).opacity(0.17) : .clear,
+                                in: RoundedRectangle(cornerRadius: 16))
+                    .overlay(RoundedRectangle(cornerRadius: 16)
+                        .stroke(message.role == .user ? Color(red: 0.55, green: 0.45, blue: 1).opacity(0.22) : .clear))
                     .frame(maxWidth: message.role == .user ? 720 : .infinity,
                            alignment: message.role == .user ? .trailing : .leading)
                 if let attachments = message.attachments, !attachments.isEmpty {

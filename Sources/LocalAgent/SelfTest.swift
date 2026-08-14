@@ -55,6 +55,13 @@ enum SelfTest {
         precondition(decodedToolHistory.toolCallID == "call-1")
         let progressMessage = ChatMessage(role: .assistant, content: "확인하겠습니다.", isProgress: true)
         precondition(progressMessage.isProgress == true)
+        let condensed = ChatMessage.visibleConversation([
+            ChatMessage(role: .user, content: "폴더를 확인해줘"),
+            ChatMessage(role: .assistant, content: "확인하겠습니다.", isProgress: true),
+            ChatMessage(role: .tool, content: "[list_files]\na.txt"),
+            ChatMessage(role: .assistant, content: "폴더에는 다음 항목이 있습니다.\n\n- a.txt")
+        ], condenseCurrentTurn: true)
+        precondition(condensed.count == 2 && condensed.last?.content.contains("a.txt") == true)
 
         let qwen38 = LocalModel(url: directory.appending(path: "Qwen3.8-27B-Q4_K_M.gguf"))
         precondition(qwen38.isQwen38 && !qwen38.isAuxiliary && qwen38.identity == "Qwen3.8")

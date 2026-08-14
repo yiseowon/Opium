@@ -161,6 +161,8 @@ final class LlamaService {
 
                             FINAL RESPONSE
                             - Lead with the completed outcome. Be concise: normally 2 to 6 lines.
+                            - The final response replaces the visible progress updates. Synthesize the result once; never repeat the plan, tool narration, or raw tool output.
+                            - For lookup tasks, introduce the result in one natural sentence and present the useful items as a clean list.
                             - Use clean Markdown when structure helps: short headings, bullet lists, and fenced code blocks with a language. Never print raw Markdown markers as decoration.
                             - Revise mistakes silently before the final answer. If a correction must be visible, state the corrected fact once and remove the obsolete claim.
                             - For file work, include exactly these useful sections when applicable: `변경` with paths and what changed, then `검증` with the check and result.

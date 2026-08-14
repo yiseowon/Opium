@@ -24,6 +24,20 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var changedFiles: [String]? = nil
     var changeStats: [FileChangeStat]? = nil
     var createdAt = Date()
+
+    static func visibleConversation(_ messages: [Self], condenseCurrentTurn: Bool) -> [Self] {
+        var turns: [[Self]] = []
+        for message in messages {
+            if message.role == .user || turns.isEmpty { turns.append([message]) }
+            else { turns[turns.count - 1].append(message) }
+        }
+        return turns.enumerated().flatMap { index, turn in
+            let shouldCondense = index < turns.count - 1 || condenseCurrentTurn
+            let hasFinal = turn.contains { $0.role == .assistant && $0.isProgress != true && !$0.content.isEmpty }
+            guard shouldCondense && hasFinal else { return turn }
+            return turn.filter { $0.role != .tool && $0.isProgress != true }
+        }
+    }
 }
 
 struct FileChangeStat: Codable, Hashable, Sendable, Identifiable {
