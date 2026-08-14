@@ -30,6 +30,7 @@ import SwiftUI
 struct ContentView: View {
     @Bindable var model: AgentViewModel
     @State private var showingPermissions = false
+    @State private var showingPlugins = false
     @State private var sidebarVisible = true
     @State private var inspectorVisible = true
 
@@ -57,6 +58,7 @@ struct ContentView: View {
             PermissionSettingsView(store: model.permissions, usage: model.store.totalUsage,
                                    modelName: model.llama.selectedModel?.name ?? "모델 없음")
         }
+        .sheet(isPresented: $showingPlugins) { PluginDirectoryView(store: model.plugins) }
         .alert("오류", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("확인", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
@@ -64,9 +66,9 @@ struct ContentView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 OpiumMark().stroke(.white, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
-                    .frame(width: 25, height: 25).accessibilityHidden(true)
+                    .frame(width: 19, height: 19).accessibilityHidden(true)
                 Text("Opium").font(.title3.weight(.semibold))
                 Spacer()
                 Button(action: model.store.newThread) { Image(systemName: "square.and.pencil") }.buttonStyle(.plain)
@@ -85,6 +87,15 @@ struct ContentView: View {
             }
             .font(.system(size: 14))
             .listStyle(.sidebar).scrollContentBackground(.hidden)
+            Button { showingPlugins = true } label: {
+                HStack {
+                    Image(systemName: "puzzlepiece.extension")
+                    Text("플러그인")
+                    Spacer()
+                    Text("\(model.plugins.plugins.filter(\.isEnabled).count)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
+            }.buttonStyle(.plain)
             Divider().opacity(0.5)
             Button { showingPermissions = true } label: {
                 HStack {
@@ -686,5 +697,85 @@ private struct PermissionSettingsView: View {
             Text(value.formatted()).font(.title3.monospacedDigit().weight(.semibold))
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct PluginDirectoryView: View {
+    @Bindable var store: PluginStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("플러그인").font(.title2.weight(.semibold))
+                    Text("스킬과 도구를 하나의 번들로 설치하고 관리합니다.").foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("플러그인 추가", systemImage: "plus") { store.chooseAndInstall() }
+                    .buttonStyle(.borderedProminent)
+                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
+            }.padding(24)
+            Divider()
+            if store.plugins.isEmpty {
+                ContentUnavailableView {
+                    Label("설치된 플러그인이 없습니다", systemImage: "puzzlepiece.extension")
+                } description: {
+                    Text("`.codex-plugin/plugin.json`이 있는 Codex 형식의 플러그인 폴더를 추가하세요.")
+                } actions: {
+                    Button("플러그인 폴더 선택", action: store.chooseAndInstall)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 12) {
+                        ForEach(store.plugins) { plugin in
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    RoundedRectangle(cornerRadius: 10).fill(.purple.opacity(0.14))
+                                        .overlay(Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.purple))
+                                        .frame(width: 44, height: 44)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(plugin.displayName).font(.headline)
+                                        Text(plugin.summary).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                                        HStack(spacing: 6) {
+                                            capability("Skill \(plugin.skillURLs.count)", active: !plugin.skillURLs.isEmpty)
+                                            capability("MCP", active: plugin.hasMCP)
+                                            capability("Hooks", active: plugin.hasHooks)
+                                            if let version = plugin.manifest.version { capability("v\(version)", active: true) }
+                                        }
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: Binding(get: { plugin.isEnabled },
+                                                             set: { store.setEnabled($0, for: plugin) }))
+                                        .labelsHidden().toggleStyle(.switch)
+                                    Menu {
+                                        Button("폴더에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([plugin.rootURL]) }
+                                        Divider()
+                                        Button("삭제", role: .destructive) { store.uninstall(plugin) }
+                                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton)
+                                }
+                                if plugin.hasMCP || plugin.hasHooks {
+                                    Label("MCP와 Hooks는 현재 자동 실행되지 않습니다.", systemImage: "shield.lefthalf.filled")
+                                        .font(.caption).foregroundStyle(.orange)
+                                }
+                            }
+                            .padding(16).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.primary.opacity(0.07)))
+                        }
+                    }.padding(20)
+                }
+            }
+        }
+        .frame(width: 720, height: 620)
+        .alert("플러그인 오류", isPresented: Binding(get: { store.errorMessage != nil },
+            set: { if !$0 { store.errorMessage = nil } })) {
+            Button("확인", role: .cancel) {}
+        } message: { Text(store.errorMessage ?? "") }
+    }
+
+    private func capability(_ title: String, active: Bool) -> some View {
+        Text(title).font(.caption2.weight(.medium)).foregroundStyle(active ? .primary : .tertiary)
+            .padding(.horizontal, 7).padding(.vertical, 4)
+            .background(.secondary.opacity(active ? 0.12 : 0.05), in: Capsule())
     }
 }

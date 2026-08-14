@@ -15,6 +15,7 @@ final class AgentViewModel {
     var activeChangeStats: [FileChangeStat] = []
     var activities: [AgentActivity] = []
     var resources = ResourceMonitor()
+    var plugins = PluginStore()
     private var activeChanges: [String] = []
 
     init() {
@@ -58,7 +59,8 @@ final class AgentViewModel {
         store.append(ChatMessage(role: .assistant, content: ""))
         var automaticCall: PendingToolCall?
         do {
-            for try await event in llama.stream(messages: messages, workspacePath: store.selectedWorkspacePath) {
+            for try await event in llama.stream(messages: messages, workspacePath: store.selectedWorkspacePath,
+                                                pluginInstructions: plugins.enabledInstructions) {
                 switch event {
                 case .text(let text):
                     if !answerStarted {

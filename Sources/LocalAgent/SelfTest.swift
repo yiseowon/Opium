@@ -1,6 +1,7 @@
 import Foundation
 
 enum SelfTest {
+    @MainActor
     static func run() throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -48,6 +49,23 @@ enum SelfTest {
         let encoded = try JSONEncoder().encode(ChatMessage(role: .user, content: "read", attachments: [attachment]))
         let decoded = try JSONDecoder().decode(ChatMessage.self, from: encoded)
         precondition(decoded.attachments?.first?.content == "hello")
+
+        let pluginRoot = directory.appending(path: "sample-plugin")
+        let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")
+        let skillDirectory = pluginRoot.appending(path: "skills/concise")
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+        try Data(#"{"name":"sample-plugin","version":"1.0.0","description":"test","skills":"./skills/"}"#.utf8)
+            .write(to: manifestDirectory.appending(path: "plugin.json"))
+        try Data("---\nname: concise\n---\nBe concise.".utf8).write(to: skillDirectory.appending(path: "SKILL.md"))
+        let plugin = try PluginStore.loadPlugin(at: pluginRoot, enabled: true)
+        precondition(plugin.manifest.name == "sample-plugin" && plugin.skillURLs.count == 1 && plugin.isEnabled)
+        try Data(#"{"name":"unsafe-plugin","skills":"../../"}"#.utf8)
+            .write(to: manifestDirectory.appending(path: "plugin.json"))
+        do {
+            _ = try PluginStore.loadPlugin(at: pluginRoot, enabled: false)
+            preconditionFailure("플러그인 외부 경로가 거절되어야 합니다.")
+        } catch { }
         print("Self-test passed")
     }
 }
