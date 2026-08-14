@@ -20,6 +20,7 @@ final class LlamaService {
     }
 
     private var process: Process?
+    private var streamTask: Task<Void, Never>?
     private let port = 11435
     private let apiKey = "localagent-loopback"
     var processID: Int32? { process?.isRunning == true ? process?.processIdentifier : nil }
@@ -94,10 +95,16 @@ final class LlamaService {
     }
 
     func stop() {
+        stopGeneration()
         process?.terminate()
         process = nil
         isRunning = false
         status = "중지됨"
+    }
+
+    func stopGeneration() {
+        streamTask?.cancel()
+        streamTask = nil
     }
 
     func stream(messages: [ChatMessage], workspacePath: String,
@@ -233,6 +240,7 @@ final class LlamaService {
                     continuation.finish(throwing: error)
                 }
             }
+            self.streamTask = task
             continuation.onTermination = { termination in
                 if case .cancelled = termination { task.cancel() }
             }

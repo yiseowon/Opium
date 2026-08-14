@@ -12,12 +12,19 @@ final class AgentViewModel {
     var pendingCall: PendingToolCall?
     var attachments: [MessageAttachment] = []
     var liveMetrics = GenerationMetrics()
+    var turnMetrics = GenerationMetrics()
     var activeChangeStats: [FileChangeStat] = []
     var activities: [AgentActivity] = []
     var inlineActivity: AgentActivity?
     var resources = ResourceMonitor()
     var plugins = PluginStore()
     private var activeChanges: [String] = []
+    private var completedStepMetrics = GenerationMetrics()
+    private var queuedPrompt: String?
+    private var queuedAttachments: [MessageAttachment] = []
+    private var stopRequested = false
+
+    var hasQueuedFollowUp: Bool { queuedPrompt != nil || !queuedAttachments.isEmpty }
 
     init() {
         llama.discoverModels()
@@ -26,10 +33,21 @@ final class AgentViewModel {
 
     func send() async {
         let prompt = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard (!prompt.isEmpty || !attachments.isEmpty), !llama.isGenerating, !llama.isStarting else { return }
+        guard !prompt.isEmpty || !attachments.isEmpty else { return }
+        if llama.isGenerating || llama.isStarting {
+            queuedPrompt = prompt
+            queuedAttachments = attachments
+            input = ""
+            attachments = []
+            return
+        }
         let sentAttachments = attachments
         activeChanges = []
         activeChangeStats = []
+        liveMetrics = GenerationMetrics()
+        turnMetrics = GenerationMetrics()
+        completedStepMetrics = GenerationMetrics()
+        stopRequested = false
         setActivity("요청 분석 중", symbol: "brain.head.profile", active: true)
         input = ""
         attachments = []
@@ -79,7 +97,8 @@ final class AgentViewModel {
                     var finalMetrics = metrics
                     finalMetrics.thinkingSeconds = liveMetrics.thinkingSeconds
                     liveMetrics = finalMetrics
-                    store.updateLastAssistant(metrics: finalMetrics)
+                    turnMetrics = completedStepMetrics.adding(finalMetrics)
+                    store.updateLastAssistant(metrics: turnMetrics)
                 case .toolCallProgress(let name, let arguments):
                     guard name == "write_file",
                           let stat = FileTools.liveChangeStat(arguments: arguments,
@@ -92,7 +111,7 @@ final class AgentViewModel {
                     let call = PendingToolCall(
                         id: id, name: name, arguments: arguments,
                         progress: visibleProgress.isEmpty ? progressFallback(for: name) : String(visibleProgress.prefix(240)),
-                        metrics: liveMetrics.completionTokens > 0 ? liveMetrics : nil
+                        metrics: nil
                     )
                     if permissions.allows(call, workspace: store.selectedWorkspacePath) { automaticCall = call }
                     else { pendingCall = call }
@@ -103,9 +122,16 @@ final class AgentViewModel {
             errorMessage = error.localizedDescription
         }
         llama.isGenerating = false
+        completedStepMetrics = turnMetrics
         store.flush()
         if issuedToolCall { store.discardLastAssistantDraft() }
-        else if liveMetrics.completionTokens > 0 { store.updateLastAssistant(metrics: liveMetrics) }
+        else if turnMetrics.completionTokens > 0 { store.updateLastAssistant(metrics: turnMetrics) }
+        if stopRequested {
+            stopRequested = false
+            setActivity("응답 중단됨", symbol: "stop.circle", active: false)
+            await sendQueuedFollowUpIfNeeded()
+            return
+        }
         if let automaticCall {
             do { try await execute(automaticCall) } catch { errorMessage = error.localizedDescription }
         } else if pendingCall == nil {
@@ -114,7 +140,14 @@ final class AgentViewModel {
             }
             await updateTitleIfNeeded()
             setActivity("작업 완료", symbol: "checkmark.circle.fill", active: false)
+            await sendQueuedFollowUpIfNeeded()
         }
+    }
+
+    func stopGeneration() {
+        guard llama.isGenerating || llama.isStarting else { return }
+        stopRequested = true
+        llama.stopGeneration()
     }
 
     func startModel() async {
@@ -174,6 +207,17 @@ final class AgentViewModel {
 
     private func updateEstimatedMetrics(startedAt: ContinuousClock.Instant) {
         liveMetrics.elapsedSeconds = startedAt.duration(to: .now).seconds
+        turnMetrics = completedStepMetrics.adding(liveMetrics)
+    }
+
+    private func sendQueuedFollowUpIfNeeded() async {
+        guard queuedPrompt != nil || !queuedAttachments.isEmpty else { return }
+        let queuedPrompt = queuedPrompt ?? ""
+        self.queuedPrompt = nil
+        input = queuedPrompt
+        attachments = queuedAttachments
+        queuedAttachments = []
+        await send()
     }
 
     private func execute(_ call: PendingToolCall) async throws {
@@ -262,6 +306,16 @@ final class AgentViewModel {
             let title = try await llama.title(for: Array(thread.messages.prefix(8)))
             store.setTitle(title, for: thread.id)
         } catch { /* A title is optional; keep the neutral placeholder on failure. */ }
+    }
+}
+
+extension GenerationMetrics {
+    func adding(_ other: Self) -> Self {
+        Self(promptTokens: promptTokens + other.promptTokens,
+             completionTokens: completionTokens + other.completionTokens,
+             tokensPerSecond: other.tokensPerSecond,
+             elapsedSeconds: elapsedSeconds + other.elapsedSeconds,
+             thinkingSeconds: thinkingSeconds ?? other.thinkingSeconds)
     }
 }
 

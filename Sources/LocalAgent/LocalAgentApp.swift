@@ -188,9 +188,13 @@ struct ContentView: View {
                         if model.llama.isGenerating, model.inlineActivity == nil {
                             HStack(spacing: 8) {
                                 OpiumLoader()
-                                MetricsView(metrics: model.liveMetrics)
+                                Text("응답 작성 중").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                                 if !model.activeChangeStats.isEmpty { ChangeCountView(stats: model.activeChangeStats) }
                             }
+                        }
+                        if turnIsActive || turnFooterMetrics.completionTokens > 0 {
+                            MetricsView(metrics: turnIsActive ? model.turnMetrics : turnFooterMetrics)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         Color.clear.frame(height: 1).id("conversation-bottom")
                     }
@@ -212,6 +216,14 @@ struct ContentView: View {
             }
         }.frame(maxWidth: .infinity)
     }
+
+    private var turnFooterMetrics: GenerationMetrics {
+        model.store.selected?.messages.last(where: {
+            $0.role == .assistant && $0.isProgress != true && $0.metrics != nil
+        })?.metrics ?? GenerationMetrics()
+    }
+
+    private var turnIsActive: Bool { model.llama.isGenerating || model.inlineActivity != nil }
 
     private func approval(_ call: PendingToolCall) -> some View {
         let paths = FileTools.paths(in: call)
@@ -241,6 +253,11 @@ struct ContentView: View {
     private var composer: some View {
         VStack(spacing: 10) {
             if !model.attachments.isEmpty { attachmentStrip }
+            if model.hasQueuedFollowUp {
+                Label("현재 답변이 끝나면 이어서 전송합니다", systemImage: "text.append")
+                    .font(.caption).foregroundStyle(Color.opiumPurple)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             TextField("무엇이든 요청하세요", text: $model.input, axis: .vertical)
                 .font(.system(size: 17)).lineLimit(2...12).textFieldStyle(.plain)
                 .frame(minHeight: 76, alignment: .topLeading)
@@ -274,13 +291,23 @@ struct ContentView: View {
                         }
                     }
                 } label: { Text(model.llama.effort.rawValue) }
-                Button { Task { await model.send() } } label: {
+                if model.llama.isGenerating,
+                   !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty {
+                    Button("다음에 보내기") { Task { await model.send() } }
+                        .buttonStyle(.plain).font(.caption.weight(.medium)).foregroundStyle(Color.opiumPurple)
+                }
+                Button {
+                    if model.llama.isGenerating { model.stopGeneration() }
+                    else { Task { await model.send() } }
+                } label: {
                     if model.llama.isStarting { OpiumLoader() }
+                    else if model.llama.isGenerating { Image(systemName: "stop.fill").font(.system(size: 11, weight: .semibold)) }
                     else { Image(systemName: "arrow.up").fontWeight(.semibold) }
                 }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
-                    .disabled((model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty)
-                              || model.llama.selectedModel == nil || model.llama.isStarting || model.llama.isGenerating)
+                    .tint(Color.opiumPurple)
+                    .disabled((!model.llama.isGenerating && model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && model.attachments.isEmpty)
+                              || model.llama.selectedModel == nil || model.llama.isStarting)
             }
         }
         .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
@@ -361,7 +388,7 @@ private struct ActivityInspector: View {
                         ForEach(model.activities.reversed()) { activity in
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: activity.securityLevel == nil ? activity.symbol : "shield.fill")
-                                    .foregroundStyle(activity.securityLevel.map(securityColor) ?? (activity.isActive ? Color.accentColor : Color.secondary))
+                                    .foregroundStyle(activity.securityLevel.map(securityColor) ?? (activity.isActive ? Color.opiumPurple : Color.secondary))
                                     .frame(width: 18)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
@@ -510,7 +537,7 @@ private struct MemoryGraph: View {
                     index == 0 ? path.move(to: CGPoint(x: x, y: y)) : path.addLine(to: CGPoint(x: x, y: y))
                 }
             }
-            .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+            .stroke(Color.opiumPurple, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
         .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
         .accessibilityLabel("시스템 메모리 사용량 그래프")
@@ -538,11 +565,10 @@ private struct MessageView: View {
                 if let attachments = message.attachments, !attachments.isEmpty {
                     HStack { ForEach(attachments) { Label("\($0.name) · \($0.formattedSize)", systemImage: "doc.text").font(.caption) } }
                 }
-                if let metrics = message.metrics, message.role == .assistant { MetricsView(metrics: metrics) }
                 if let files = message.changedFiles, !files.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("변경한 항목 \(files.count)개", systemImage: "checkmark.circle.fill")
-                            .font(.caption.weight(.semibold)).foregroundStyle(.green)
+                            .font(.caption.weight(.semibold)).foregroundStyle(Color.opiumPurple)
                         if let stats = message.changeStats, !stats.isEmpty {
                             ForEach(stats) { stat in
                                 HStack {
@@ -559,7 +585,8 @@ private struct MessageView: View {
                             }
                         }
                     }
-                    .padding(10).background(.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(10).background(Color.opiumPurple.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.opiumPurple.opacity(0.16)))
                 }
             }
             .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
@@ -728,7 +755,6 @@ private struct ToolMessageView: View {
             } label: {
                 HStack(spacing: 8) {
                     Label(toolTitle + " 완료", systemImage: "checkmark.circle").font(.caption.weight(.medium))
-                    if let metrics = message.metrics { MetricsView(metrics: metrics) }
                 }
             }
         }.foregroundStyle(.secondary).padding(11).background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
@@ -787,7 +813,7 @@ private struct PermissionSettingsView: View {
                     Button { store.policy = policy } label: {
                         HStack(spacing: 10) {
                             Image(systemName: store.policy == policy ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(store.policy == policy ? Color.accentColor : .secondary)
+                                .foregroundStyle(store.policy == policy ? Color.opiumPurple : .secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(policy.title).foregroundStyle(.primary)
                                 Text(policy.detail).font(.caption).foregroundStyle(.secondary)
@@ -861,7 +887,8 @@ private struct PluginDirectoryView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(alignment: .top, spacing: 12) {
                                     RoundedRectangle(cornerRadius: 10).fill(Color.opiumPurple.opacity(0.14))
-                                        .overlay(Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(Color.opiumPurple))
+                                        .overlay(Image(systemName: plugin.isBuiltIn ? "syringe.fill" : "puzzlepiece.extension.fill")
+                                            .foregroundStyle(Color.opiumPurple))
                                         .frame(width: 44, height: 44)
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack(spacing: 7) {
@@ -903,6 +930,26 @@ private struct PluginDirectoryView: View {
                             .padding(16).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.primary.opacity(0.07)))
                         }
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("추천 MCP 연결").font(.headline)
+                            Text("인기 서비스를 위한 카탈로그입니다. 계정 연결과 실제 실행은 각 MCP 설치 후 활성화됩니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                                ForEach(Self.catalog) { item in
+                                    HStack(spacing: 10) {
+                                        Image(systemName: item.symbol).frame(width: 22).foregroundStyle(Color.opiumPurple)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.name).font(.system(size: 13, weight: .semibold))
+                                            Text(item.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        Spacer()
+                                        Text("연결 필요").font(.caption2).foregroundStyle(.tertiary)
+                                    }
+                                    .padding(11).background(Color.opiumPurple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                        }
+                        .padding(16).background(.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
                     }.padding(20)
                 }
             }
@@ -919,4 +966,24 @@ private struct PluginDirectoryView: View {
             .padding(.horizontal, 7).padding(.vertical, 4)
             .background(.secondary.opacity(active ? 0.12 : 0.05), in: Capsule())
     }
+
+    private struct CatalogItem: Identifiable {
+        let name: String, detail: String, symbol: String
+        var id: String { name }
+    }
+
+    private static let catalog = [
+        CatalogItem(name: "Gmail", detail: "메일 검색·요약·초안", symbol: "envelope.fill"),
+        CatalogItem(name: "Google Drive", detail: "파일 검색·문서 읽기", symbol: "externaldrive.fill"),
+        CatalogItem(name: "Google Calendar", detail: "일정 조회·생성", symbol: "calendar"),
+        CatalogItem(name: "Notion", detail: "페이지·데이터베이스", symbol: "doc.text.fill"),
+        CatalogItem(name: "GitHub", detail: "저장소·이슈·PR", symbol: "chevron.left.forwardslash.chevron.right"),
+        CatalogItem(name: "Slack", detail: "채널 검색·메시지", symbol: "number"),
+        CatalogItem(name: "Linear", detail: "이슈·프로젝트 관리", symbol: "line.3.horizontal.decrease.circle"),
+        CatalogItem(name: "Figma", detail: "디자인 파일·코멘트", symbol: "paintbrush.fill"),
+        CatalogItem(name: "Dropbox", detail: "클라우드 파일", symbol: "shippingbox.fill"),
+        CatalogItem(name: "PostgreSQL", detail: "스키마·쿼리", symbol: "cylinder.fill"),
+        CatalogItem(name: "Sentry", detail: "오류·성능 분석", symbol: "exclamationmark.triangle.fill"),
+        CatalogItem(name: "Stripe", detail: "결제 데이터 조회", symbol: "creditcard.fill")
+    ]
 }

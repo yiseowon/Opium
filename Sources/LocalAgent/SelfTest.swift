@@ -77,6 +77,10 @@ enum SelfTest {
                                           metrics: GenerationMetrics(promptTokens: 10, completionTokens: 5,
                                                                      tokensPerSecond: 12, elapsedSeconds: 1))
         precondition(meteredCall.progress == "폴더를 확인합니다." && meteredCall.metrics?.completionTokens == 5)
+        let combinedMetrics = GenerationMetrics(promptTokens: 10, completionTokens: 5, elapsedSeconds: 2)
+            .adding(GenerationMetrics(promptTokens: 7, completionTokens: 3, tokensPerSecond: 12, elapsedSeconds: 1))
+        precondition(combinedMetrics.promptTokens + combinedMetrics.completionTokens == 25
+                     && combinedMetrics.elapsedSeconds == 3 && combinedMetrics.tokensPerSecond == 12)
         precondition(FileTools.securityLevel(for: .init(id: "safe", name: "read_file", arguments: toolArguments),
                                              workspace: directory.path) == .normal)
         let sshArguments = String(decoding: try JSONSerialization.data(withJSONObject: [
