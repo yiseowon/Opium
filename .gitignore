@@ -1,0 +1,12 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.app/
+*.gguf
+*.gguf.*
+Models/*
+!Models/.gitkeep
+task_plan.md
+findings.md
+progress.md
