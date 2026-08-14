@@ -20,6 +20,7 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var toolCallID: String? = nil
     var toolName: String? = nil
     var toolArguments: String? = nil
+    var isProgress: Bool? = nil
     var changedFiles: [String]? = nil
     var changeStats: [FileChangeStat]? = nil
     var createdAt = Date()

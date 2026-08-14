@@ -110,6 +110,7 @@ final class LlamaService {
             templateOptions["reasoning_effort"] = effort.qwenReasoningEffort
         }
         let history = messages.flatMap { message -> [[String: Any]] in
+            if message.isProgress == true { return [] }
             let attachmentContext = (message.attachments ?? []).map { attachment in
                 "\n\n<attached_file name=\"\(attachment.name)\" path=\"\(attachment.path)\">\n\(attachment.content)\n</attached_file>"
             }.joined()

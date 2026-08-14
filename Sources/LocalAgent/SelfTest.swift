@@ -53,6 +53,8 @@ enum SelfTest {
                                       toolName: "list_files", toolArguments: #"{"path":"."}"#)
         let decodedToolHistory = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(toolHistory))
         precondition(decodedToolHistory.toolCallID == "call-1")
+        let progressMessage = ChatMessage(role: .assistant, content: "확인하겠습니다.", isProgress: true)
+        precondition(progressMessage.isProgress == true)
 
         let qwen38 = LocalModel(url: directory.appending(path: "Qwen3.8-27B-Q4_K_M.gguf"))
         precondition(qwen38.isQwen38 && !qwen38.isAuxiliary && qwen38.identity == "Qwen3.8")

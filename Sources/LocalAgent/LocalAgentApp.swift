@@ -162,6 +162,19 @@ struct ContentView: View {
                             .padding(.vertical, 4)
                             .transition(.opacity)
                         }
+                        if let activity = model.inlineActivity {
+                            HStack(spacing: 10) {
+                                ProgressView().controlSize(.small)
+                                Image(systemName: activity.symbol).foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(activity.title).font(.system(size: 14, weight: .medium))
+                                    if let detail = activity.detail, !detail.isEmpty {
+                                        Text(detail).font(.system(size: 12, design: .monospaced))
+                                            .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                                    }
+                                }
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         if model.llama.isGenerating {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
@@ -597,15 +610,11 @@ private struct ToolMessageView: View {
     let message: ChatMessage
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let progress = message.reasoning, !progress.isEmpty {
-                Text(progress).font(.system(size: 14)).foregroundStyle(.primary.opacity(0.88))
-                    .lineLimit(2).textSelection(.enabled)
-            }
             DisclosureGroup {
                 Text(message.content).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).padding(.top, 8)
             } label: {
                 HStack(spacing: 8) {
-                    Label(toolTitle, systemImage: "terminal").font(.caption.weight(.medium))
+                    Label(toolTitle + " 완료", systemImage: "checkmark.circle").font(.caption.weight(.medium))
                     if let metrics = message.metrics { MetricsView(metrics: metrics) }
                 }
             }

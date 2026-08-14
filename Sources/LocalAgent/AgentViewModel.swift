@@ -14,6 +14,7 @@ final class AgentViewModel {
     var liveMetrics = GenerationMetrics()
     var activeChangeStats: [FileChangeStat] = []
     var activities: [AgentActivity] = []
+    var inlineActivity: AgentActivity?
     var resources = ResourceMonitor()
     var plugins = PluginStore()
     private var activeChanges: [String] = []
@@ -173,10 +174,20 @@ final class AgentViewModel {
 
     private func execute(_ call: PendingToolCall) async throws {
         let workspace = store.selectedWorkspacePath
+        if let progress = call.progress, !progress.isEmpty {
+            store.append(ChatMessage(role: .assistant, content: progress, metrics: call.metrics, isProgress: true))
+        }
         setActivity(activityTitle(for: call.name), detail: FileTools.presentation(for: call).target,
                     symbol: activitySymbol(for: call.name), active: true)
+        inlineActivity = AgentActivity(title: activityTitle(for: call.name),
+                                       detail: FileTools.presentation(for: call).target,
+                                       symbol: activitySymbol(for: call.name), isActive: true)
         let changeStat = FileTools.changeStat(for: call, workspace: workspace)
-        let result = try await Task.detached { try FileTools.run(call, workspace: workspace) }.value
+        let result: String
+        do { result = try await Task.detached { try FileTools.run(call, workspace: workspace) }.value }
+        catch { inlineActivity = nil; throw error }
+        try? await Task.sleep(for: .milliseconds(350))
+        inlineActivity = nil
         if let changeStat {
             activeChangeStats.removeAll { $0.path == changeStat.path }
             activeChangeStats.append(changeStat)
@@ -185,7 +196,7 @@ final class AgentViewModel {
             for path in FileTools.paths(in: call, workspace: workspace) where !activeChanges.contains(path) { activeChanges.append(path) }
         }
         store.append(ChatMessage(role: .tool, content: "[\(call.name)]\n\(result)",
-                                 reasoning: call.progress, metrics: call.metrics,
+                                 reasoning: call.progress,
                                  toolCallID: call.id, toolName: call.name, toolArguments: call.arguments))
         await generate()
     }
