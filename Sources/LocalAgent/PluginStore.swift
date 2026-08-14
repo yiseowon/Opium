@@ -28,6 +28,7 @@ struct InstalledPlugin: Identifiable, Hashable {
     let skillURLs: [URL]
     let hasMCP: Bool
     let hasHooks: Bool
+    let isBuiltIn: Bool
     var isEnabled: Bool
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.isEnabled == rhs.isEnabled }
@@ -52,9 +53,13 @@ final class PluginStore {
 
     func discover() {
         let enabled = Set(UserDefaults.standard.stringArray(forKey: enabledKey) ?? [])
-        let roots = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
+        var roots = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
                                                                   options: [.skipsHiddenFiles])) ?? []
-        plugins = roots.compactMap { try? Self.loadPlugin(at: $0, enabled: enabled.contains($0.lastPathComponent)) }
+        if let builtIn = Self.builtInPluginURL { roots.append(builtIn) }
+        plugins = roots.compactMap {
+            let isBuiltIn = $0.lastPathComponent == "adrenaline-kit"
+            return try? Self.loadPlugin(at: $0, enabled: isBuiltIn || enabled.contains($0.lastPathComponent), isBuiltIn: isBuiltIn)
+        }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 
@@ -84,6 +89,7 @@ final class PluginStore {
     }
 
     func setEnabled(_ enabled: Bool, for plugin: InstalledPlugin) {
+        guard !plugin.isBuiltIn else { return }
         var names = Set(UserDefaults.standard.stringArray(forKey: enabledKey) ?? [])
         if enabled { names.insert(plugin.manifest.name) } else { names.remove(plugin.manifest.name) }
         UserDefaults.standard.set(Array(names), forKey: enabledKey)
@@ -91,6 +97,7 @@ final class PluginStore {
     }
 
     func uninstall(_ plugin: InstalledPlugin) {
+        guard !plugin.isBuiltIn else { return }
         do {
             setEnabled(false, for: plugin)
             _ = try FileManager.default.trashItem(at: plugin.rootURL, resultingItemURL: nil)
@@ -112,7 +119,7 @@ final class PluginStore {
         }.joined(separator: "\n\n")
     }
 
-    static func loadPlugin(at root: URL, enabled: Bool) throws -> InstalledPlugin {
+    static func loadPlugin(at root: URL, enabled: Bool, isBuiltIn: Bool = false) throws -> InstalledPlugin {
         let manifestURL = root.appending(path: ".codex-plugin/plugin.json")
         let data = try Data(contentsOf: manifestURL)
         let manifest = try JSONDecoder().decode(PluginManifest.self, from: data)
@@ -125,7 +132,16 @@ final class PluginStore {
         return InstalledPlugin(manifest: manifest, rootURL: root, skillURLs: skillURLs,
                                hasMCP: FileManager.default.fileExists(atPath: mcpURL.path),
                                hasHooks: FileManager.default.fileExists(atPath: hooksURL.path),
+                               isBuiltIn: isBuiltIn,
                                isEnabled: enabled)
+    }
+
+    private static var builtInPluginURL: URL? {
+        let candidates = [
+            Bundle.main.resourceURL?.appending(path: "BuiltInPlugins/adrenaline-kit"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appending(path: "BuiltInPlugins/adrenaline-kit")
+        ].compactMap { $0 }
+        return candidates.first { FileManager.default.fileExists(atPath: $0.appending(path: ".codex-plugin/plugin.json").path) }
     }
 
     private static func componentURL(in root: URL, path: String?, defaultPath: String) throws -> URL {

@@ -306,6 +306,9 @@ final class LlamaService {
         tool("fetch_url", "Fetch the UTF-8 contents of an HTTP or HTTPS webpage. Read-only.", [
             "url": "Complete HTTP or HTTPS URL"
         ]),
+        tool("web_search", "Search the public web and return result titles and URLs. Read-only.", [
+            "query": "Search query", "limit": "Maximum results from 1 to 10"
+        ]),
         tool("list_files", "폴더의 파일 목록을 읽습니다.", ["path": "조회할 폴더의 절대 경로"]),
         tool("read_file", "텍스트 파일을 읽습니다.", ["path": "읽을 파일의 절대 경로"]),
         tool("move_file", "파일을 다른 위치로 이동합니다. 사용자 승인이 필요합니다.", [

@@ -84,6 +84,12 @@ enum SelfTest {
         let serverCall = PendingToolCall(id: "server", name: "run_command", arguments: #"{"command":"python3 -m http.server 8000 & open -a Safari http://localhost:8000","working_directory":"/tmp"}"#)
         precondition(FileTools.liveTitle(for: serverCall) == "로컬 서버를 시작하고 Safari에서 여는 중")
         precondition(ResourceMonitor.gpuUsage(from: #""PerformanceStatistics" = {"Device Utilization %"=73}"#) == 0.73)
+        let searchHTML = #"<a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com&amp;rut=x">Example &amp; Test</a>"#
+        let searchResults = FileTools.searchResults(from: searchHTML, limit: 5)
+        precondition(searchResults.first?.title == "Example & Test" && searchResults.first?.url == "https://example.com")
+        let listBlocks = MarkdownBlock.parse("- index.html\n- server.log")
+        guard case .bullets(let listItems) = listBlocks.first else { preconditionFailure("목록이 카드 단위로 묶이지 않았습니다.") }
+        precondition(listItems == ["index.html", "server.log"])
 
         let pluginRoot = directory.appending(path: "sample-plugin")
         let manifestDirectory = pluginRoot.appending(path: ".codex-plugin")

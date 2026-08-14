@@ -1,0 +1,19 @@
+{
+  "name": "adrenaline-kit",
+  "version": "0.1.0",
+  "description": "Opium의 검색·웹·파일·메일 자동화를 묶은 기본 에이전트 도구 모음",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Adrenaline Kit",
+    "shortDescription": "검색·웹·파일·메일을 위한 Opium 기본 도구",
+    "longDescription": "웹 검색과 페이지 읽기, 파일 작업, Apple Mail 검색, 터미널 검증을 하나의 안전한 기본 번들로 제공합니다.",
+    "developerName": "Opium",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Adrenaline Kit의 기본 도구를 사용해 작업을 끝까지 수행해줘."
+  },
+  "mcpServers": "./.mcp.json"
+}

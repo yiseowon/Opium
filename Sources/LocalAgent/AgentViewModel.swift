@@ -181,7 +181,7 @@ final class AgentViewModel {
                                        symbol: activitySymbol(for: call.name), isActive: true)
         let changeStat = FileTools.changeStat(for: call, workspace: workspace)
         let result: String
-        do { result = try await Task.detached { try FileTools.run(call, workspace: workspace) }.value }
+        do { result = try await Task.detached { try await FileTools.runAsync(call, workspace: workspace) }.value }
         catch {
             inlineActivity = nil
             completeToolActivity(activityID, outcome: "실패: \(error.localizedDescription)")
@@ -230,7 +230,8 @@ final class AgentViewModel {
          "trash_file": "요청한 파일을 복구 가능한 휴지통으로 옮깁니다.",
          "run_command": "변경 결과를 실행해 오류와 누락을 검증합니다.",
          "search_mail": "관련 메일을 찾아 필요한 내용을 확인합니다.",
-         "fetch_url": "웹페이지 내용을 확인해 작업에 반영합니다."][tool] ?? "다음 작업에 필요한 정보를 확인합니다."
+         "fetch_url": "웹페이지 내용을 확인해 작업에 반영합니다.",
+         "web_search": "웹에서 관련 정보를 찾아 확인할 출처를 고릅니다."][tool] ?? "다음 작업에 필요한 정보를 확인합니다."
     }
 
     private func setActivity(_ title: String, detail: String? = nil, symbol: String, active: Bool) {
@@ -242,7 +243,8 @@ final class AgentViewModel {
     private func activitySymbol(for tool: String) -> String {
         ["read_file": "doc.text", "list_files": "folder", "search_files": "magnifyingglass",
          "write_file": "square.and.pencil", "create_directory": "folder.badge.plus", "move_file": "arrow.right",
-         "trash_file": "trash", "run_command": "terminal", "search_mail": "envelope", "fetch_url": "globe"][tool] ?? "wrench"
+         "trash_file": "trash", "run_command": "terminal", "search_mail": "envelope", "fetch_url": "globe",
+         "web_search": "magnifyingglass.circle"][tool] ?? "wrench"
     }
 
     private func updateTitleIfNeeded() async {

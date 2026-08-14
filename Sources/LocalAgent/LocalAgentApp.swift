@@ -555,15 +555,23 @@ private struct MarkdownMessageView: View {
                 case .heading(let level, let text):
                     inline(text).font(.system(size: level == 1 ? 22 : level == 2 ? 19 : 17, weight: .semibold))
                         .padding(.top, level == 1 ? 5 : 2)
-                case .bullet(let text):
-                    HStack(alignment: .firstTextBaseline, spacing: 9) {
-                        Circle().fill(.secondary).frame(width: 5, height: 5)
-                        inline(text)
-                    }.padding(.leading, 4)
-                case .numbered(let number, let text):
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(number).").foregroundStyle(.secondary).frame(minWidth: 18, alignment: .trailing)
-                        inline(text)
+                case .bullets(let items):
+                    listCard {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, text in
+                            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                                Circle().fill(.secondary).frame(width: 5, height: 5)
+                                inline(text)
+                            }
+                        }
+                    }
+                case .numbered(let items):
+                    listCard {
+                        ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                            HStack(alignment: .firstTextBaseline, spacing: 9) {
+                                Text("\(item.0).").foregroundStyle(.secondary).frame(minWidth: 18, alignment: .trailing)
+                                inline(item.1)
+                            }
+                        }
                     }
                 case .paragraph(let text):
                     inline(text)
@@ -573,7 +581,14 @@ private struct MarkdownMessageView: View {
             }
         }
         .font(.system(size: 16.5)).lineSpacing(6).textSelection(.enabled)
-        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func listCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10, content: content)
+            .padding(.horizontal, 14).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 11))
+            .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.08)))
     }
 
     private func inline(_ source: String) -> Text {
@@ -583,39 +598,46 @@ private struct MarkdownMessageView: View {
     }
 }
 
-private enum MarkdownBlock {
-    case heading(Int, String), bullet(String), numbered(Int, String), paragraph(String), code(String, String)
+enum MarkdownBlock {
+    case heading(Int, String), bullets([String]), numbered([(Int, String)]), paragraph(String), code(String, String)
 
     static func parse(_ source: String) -> [Self] {
         var result: [Self] = []
         var paragraph: [String] = []
         var code: [String] = []
+        var bullets: [String] = []
+        var numbers: [(Int, String)] = []
         var language = ""
         var inCode = false
         func flushParagraph() {
             if !paragraph.isEmpty { result.append(.paragraph(paragraph.joined(separator: "\n"))); paragraph.removeAll() }
         }
+        func flushLists() {
+            if !bullets.isEmpty { result.append(.bullets(bullets)); bullets.removeAll() }
+            if !numbers.isEmpty { result.append(.numbered(numbers)); numbers.removeAll() }
+        }
         for line in source.components(separatedBy: .newlines) {
             if line.hasPrefix("```") {
                 if inCode { result.append(.code(language, code.joined(separator: "\n"))); code.removeAll() }
-                else { flushParagraph(); language = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
+                else { flushParagraph(); flushLists(); language = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
                 inCode.toggle(); continue
             }
             if inCode { code.append(line); continue }
-            if line.trimmingCharacters(in: .whitespaces).isEmpty { flushParagraph(); continue }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { flushParagraph(); flushLists(); continue }
             if let match = line.firstMatch(of: /^(#{1,6})\s+(.+)$/) {
-                flushParagraph(); result.append(.heading(match.1.count, String(match.2))); continue
+                flushParagraph(); flushLists(); result.append(.heading(match.1.count, String(match.2))); continue
             }
             if let match = line.firstMatch(of: /^\s*[-*•]\s+(.+)$/) {
-                flushParagraph(); result.append(.bullet(String(match.1))); continue
+                flushParagraph(); if !numbers.isEmpty { flushLists() }; bullets.append(String(match.1)); continue
             }
             if let match = line.firstMatch(of: /^\s*(\d+)\.\s+(.+)$/), let number = Int(match.1) {
-                flushParagraph(); result.append(.numbered(number, String(match.2))); continue
+                flushParagraph(); if !bullets.isEmpty { flushLists() }; numbers.append((number, String(match.2))); continue
             }
+            flushLists()
             paragraph.append(line)
         }
         if inCode { result.append(.code(language, code.joined(separator: "\n"))) }
-        flushParagraph()
+        flushParagraph(); flushLists()
         return result
     }
 }
@@ -689,7 +711,7 @@ private struct ToolMessageView: View {
             "[search_files]": "파일 검색", "[write_file]": "파일 수정",
             "[create_directory]": "폴더 생성", "[move_file]": "파일 이동",
             "[trash_file]": "휴지통으로 이동", "[run_command]": "명령 실행",
-            "[search_mail]": "메일 검색", "[fetch_url]": "웹페이지 확인"
+            "[search_mail]": "메일 검색", "[fetch_url]": "웹페이지 확인", "[web_search]": "웹 검색"
         ][name] ?? "도구 실행"
     }
 }
@@ -814,11 +836,18 @@ private struct PluginDirectoryView: View {
                                         .overlay(Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.purple))
                                         .frame(width: 44, height: 44)
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(plugin.displayName).font(.headline)
+                                        HStack(spacing: 7) {
+                                            Text(plugin.displayName).font(.headline)
+                                            if plugin.isBuiltIn {
+                                                Text("기본 제공").font(.caption2.weight(.semibold)).foregroundStyle(.purple)
+                                                    .padding(.horizontal, 6).padding(.vertical, 3)
+                                                    .background(.purple.opacity(0.12), in: Capsule())
+                                            }
+                                        }
                                         Text(plugin.summary).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
                                         HStack(spacing: 6) {
                                             capability("Skill \(plugin.skillURLs.count)", active: !plugin.skillURLs.isEmpty)
-                                            capability("MCP", active: plugin.hasMCP)
+                                            capability(plugin.isBuiltIn ? "기본 도구 11" : "MCP", active: plugin.isBuiltIn || plugin.hasMCP)
                                             capability("Hooks", active: plugin.hasHooks)
                                             if let version = plugin.manifest.version { capability("v\(version)", active: true) }
                                         }
@@ -826,14 +855,19 @@ private struct PluginDirectoryView: View {
                                     Spacer()
                                     Toggle("", isOn: Binding(get: { plugin.isEnabled },
                                                              set: { store.setEnabled($0, for: plugin) }))
-                                        .labelsHidden().toggleStyle(.switch)
-                                    Menu {
-                                        Button("폴더에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([plugin.rootURL]) }
-                                        Divider()
-                                        Button("삭제", role: .destructive) { store.uninstall(plugin) }
-                                    } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton)
+                                        .labelsHidden().toggleStyle(.switch).disabled(plugin.isBuiltIn)
+                                    if !plugin.isBuiltIn {
+                                        Menu {
+                                            Button("폴더에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([plugin.rootURL]) }
+                                            Divider()
+                                            Button("삭제", role: .destructive) { store.uninstall(plugin) }
+                                        } label: { Image(systemName: "ellipsis") }.menuStyle(.borderlessButton)
+                                    }
                                 }
-                                if plugin.hasMCP || plugin.hasHooks {
+                                if plugin.isBuiltIn {
+                                    Label("Opium 보안 정책과 활동 로그를 통해 항상 안전하게 실행됩니다.", systemImage: "bolt.shield.fill")
+                                        .font(.caption).foregroundStyle(.purple)
+                                } else if plugin.hasMCP || plugin.hasHooks {
                                     Label("MCP와 Hooks는 현재 자동 실행되지 않습니다.", systemImage: "shield.lefthalf.filled")
                                         .font(.caption).foregroundStyle(.orange)
                                 }
