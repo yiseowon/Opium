@@ -81,6 +81,14 @@ final class ThreadStore {
         save()
     }
 
+    func fillEmptyLastAssistant(with text: String) {
+        guard let index = selectedIndex,
+              let messageIndex = threads[index].messages.lastIndex(where: { $0.role == .assistant }),
+              threads[index].messages[messageIndex].content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        threads[index].messages[messageIndex].content = text
+        save()
+    }
+
     func flush() { save() }
 
     func delete(_ ids: Set<UUID>) {

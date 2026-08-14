@@ -26,6 +26,10 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var createdAt = Date()
 
     static func visibleConversation(_ messages: [Self], condenseCurrentTurn: Bool) -> [Self] {
+        let messages = messages.filter {
+            $0.role != .assistant || !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !($0.reasoning ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
         var turns: [[Self]] = []
         for message in messages {
             if message.role == .user || turns.isEmpty { turns.append([message]) }

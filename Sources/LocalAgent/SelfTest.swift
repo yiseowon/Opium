@@ -65,6 +65,11 @@ enum SelfTest {
             ChatMessage(role: .assistant, content: "폴더에는 다음 항목이 있습니다.\n\n- a.txt")
         ], condenseCurrentTurn: true)
         precondition(condensed.count == 2 && condensed.last?.content.contains("a.txt") == true)
+        let withoutEmptyDraft = ChatMessage.visibleConversation([
+            ChatMessage(role: .user, content: "질문"),
+            ChatMessage(role: .assistant, content: "", metrics: GenerationMetrics(promptTokens: 10))
+        ], condenseCurrentTurn: true)
+        precondition(withoutEmptyDraft.count == 1 && withoutEmptyDraft.first?.role == .user)
 
         let qwen38 = LocalModel(url: directory.appending(path: "Qwen3.8-27B-Q4_K_M.gguf"))
         precondition(qwen38.isQwen38 && !qwen38.isAuxiliary && qwen38.identity == "Qwen3.8")

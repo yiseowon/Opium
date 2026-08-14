@@ -220,6 +220,7 @@ struct ContentView: View {
     private var turnFooterMetrics: GenerationMetrics {
         model.store.selected?.messages.last(where: {
             $0.role == .assistant && $0.isProgress != true && $0.metrics != nil
+                && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         })?.metrics ?? GenerationMetrics()
     }
 

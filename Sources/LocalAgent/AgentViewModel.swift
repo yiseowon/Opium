@@ -128,6 +128,7 @@ final class AgentViewModel {
         else if turnMetrics.completionTokens > 0 { store.updateLastAssistant(metrics: turnMetrics) }
         if stopRequested {
             stopRequested = false
+            store.fillEmptyLastAssistant(with: "응답이 중단되었습니다.")
             setActivity("응답 중단됨", symbol: "stop.circle", active: false)
             await sendQueuedFollowUpIfNeeded()
             return
@@ -135,6 +136,7 @@ final class AgentViewModel {
         if let automaticCall {
             do { try await execute(automaticCall) } catch { errorMessage = error.localizedDescription }
         } else if pendingCall == nil {
+            store.fillEmptyLastAssistant(with: "모델이 답변을 생성하지 못했습니다. 다시 시도해 주세요.")
             if !activeChanges.isEmpty {
                 store.updateLastAssistant(changedFiles: activeChanges, changeStats: activeChangeStats)
             }
