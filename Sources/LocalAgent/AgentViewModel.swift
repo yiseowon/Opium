@@ -10,6 +10,7 @@ final class AgentViewModel {
     var input = ""
     var errorMessage: String?
     var pendingCall: PendingToolCall?
+    var pendingQuestion: AgentQuestion?
     var attachments: [MessageAttachment] = []
     var liveMetrics = GenerationMetrics()
     var turnMetrics = GenerationMetrics()
@@ -28,6 +29,7 @@ final class AgentViewModel {
 
     init() {
         llama.discoverModels()
+        llama.lowPowerMode = plugins.isEnabled("melatonin-kit")
         resources.start { [weak llama] in llama?.processID }
     }
 
@@ -42,6 +44,7 @@ final class AgentViewModel {
             return
         }
         let sentAttachments = attachments
+        llama.lowPowerMode = plugins.isEnabled("melatonin-kit")
         activeChanges = []
         activeChangeStats = []
         liveMetrics = GenerationMetrics()
@@ -113,7 +116,9 @@ final class AgentViewModel {
                         progress: visibleProgress.isEmpty ? progressFallback(for: name) : String(visibleProgress.prefix(240)),
                         metrics: nil
                     )
-                    if permissions.allows(call, workspace: store.selectedWorkspacePath) { automaticCall = call }
+                    if name == "ask_user", let question = Self.question(from: call) {
+                        pendingQuestion = question
+                    } else if permissions.allows(call, workspace: store.selectedWorkspacePath) { automaticCall = call }
                     else { pendingCall = call }
                 case .completed: break
                 }
@@ -135,7 +140,7 @@ final class AgentViewModel {
         }
         if let automaticCall {
             do { try await execute(automaticCall) } catch { errorMessage = error.localizedDescription }
-        } else if pendingCall == nil {
+        } else if pendingCall == nil && pendingQuestion == nil {
             store.fillEmptyLastAssistant(with: "모델이 답변을 생성하지 못했습니다. 다시 시도해 주세요.")
             if !activeChanges.isEmpty {
                 store.updateLastAssistant(changedFiles: activeChanges, changeStats: activeChangeStats)
@@ -164,6 +169,18 @@ final class AgentViewModel {
         if restart { await startModel() }
     }
 
+    func setPluginEnabled(_ enabled: Bool, for plugin: InstalledPlugin) async {
+        plugins.setEnabled(enabled, for: plugin)
+        guard plugin.manifest.name == "melatonin-kit" else { return }
+        let shouldUseLowPower = plugins.isEnabled("melatonin-kit")
+        guard llama.lowPowerMode != shouldUseLowPower else { return }
+        llama.lowPowerMode = shouldUseLowPower
+        if llama.isRunning && !llama.isGenerating {
+            llama.stop()
+            await startModel()
+        }
+    }
+
     func approve() async {
         guard let call = pendingCall else { return }
         pendingCall = nil
@@ -181,6 +198,15 @@ final class AgentViewModel {
         guard let call = pendingCall else { return }
         pendingCall = nil
         store.append(ChatMessage(role: .tool, content: "사용자가 \(call.name) 실행을 거절했습니다."))
+    }
+
+    func answerQuestion(_ answer: String) async {
+        guard let question = pendingQuestion else { return }
+        pendingQuestion = nil
+        store.append(ChatMessage(role: .tool, content: "사용자 선택: \(answer)",
+                                 toolCallID: question.id, toolName: "ask_user",
+                                 toolArguments: "{}"))
+        await generate()
     }
 
     func chooseFiles() {
@@ -308,6 +334,17 @@ final class AgentViewModel {
             let title = try await llama.title(for: Array(thread.messages.prefix(8)))
             store.setTitle(title, for: thread.id)
         } catch { /* A title is optional; keep the neutral placeholder on failure. */ }
+    }
+
+    private static func question(from call: PendingToolCall) -> AgentQuestion? {
+        guard let data = call.arguments.data(using: .utf8),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [String: String],
+              let question = values["question"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !question.isEmpty else { return nil }
+        let options = (values["options"] ?? "").split(separator: "|")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        guard (2...4).contains(options.count) else { return nil }
+        return AgentQuestion(id: call.id, question: question, detail: values["detail"], options: options)
     }
 }
 

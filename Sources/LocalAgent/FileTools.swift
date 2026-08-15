@@ -66,8 +66,8 @@ enum FileTools {
         guard let rawPath = arguments["path"], let newContent = arguments["content"] else { return nil }
         let path = normalizedPath(rawPath, workspace: workspace)
         let oldContent = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-        let newLines = newContent.isEmpty ? [] : newContent.components(separatedBy: .newlines)
-        let oldLines = oldContent.isEmpty ? [] : oldContent.components(separatedBy: .newlines)
+        let newLines = lines(in: newContent)
+        let oldLines = lines(in: oldContent)
         let difference = newLines.difference(from: oldLines)
         var additions = 0
         var deletions = 0
@@ -85,8 +85,8 @@ enum FileTools {
               let newContent = partialJSONString(named: "content", in: arguments) else { return nil }
         let path = normalizedPath(rawPath, workspace: workspace)
         let oldContent = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-        let newLines = newContent.isEmpty ? [] : newContent.components(separatedBy: .newlines)
-        let oldLines = oldContent.isEmpty ? [] : oldContent.components(separatedBy: .newlines)
+        let newLines = lines(in: newContent)
+        let oldLines = lines(in: oldContent)
         let difference = newLines.difference(from: Array(oldLines.prefix(newLines.count)))
         var additions = 0, deletions = 0
         for change in difference {
@@ -120,6 +120,13 @@ enum FileTools {
             else { result.append(character) }
         }
         return requireClosingQuote && !closed ? nil : result
+    }
+
+    private static func lines(in content: String) -> [String] {
+        guard !content.isEmpty else { return [] }
+        var lines = content.components(separatedBy: "\n")
+        if content.hasSuffix("\n") { lines.removeLast() }
+        return lines
     }
 
     static func run(_ call: PendingToolCall, workspace: String? = nil) throws -> String {

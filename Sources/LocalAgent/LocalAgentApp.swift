@@ -3,11 +3,17 @@ import SwiftUI
 
 extension Color {
     static let opiumPurple = Color(red: 0.48, green: 0.38, blue: 0.96)
+    static let opiumPurpleSoft = opiumPurple.opacity(0.14)
+    static let opiumPurpleMuted = opiumPurple.opacity(0.07)
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var service: LlamaService?
-    func applicationWillTerminate(_ notification: Notification) { service?.stop() }
+    weak var resourceMonitor: ResourceMonitor?
+    func applicationWillTerminate(_ notification: Notification) {
+        resourceMonitor?.stop()
+        service?.stop()
+    }
 }
 
 @main struct LocalAgentApp: App {
@@ -24,9 +30,13 @@ extension Color {
     var body: some Scene {
         WindowGroup {
             ContentView(model: model).frame(minWidth: 1_140, minHeight: 650)
-                .onAppear { appDelegate.service = model.llama }
+                .onAppear {
+                    appDelegate.service = model.llama
+                    appDelegate.resourceMonitor = model.resources
+                }
         }
         .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .commands { CommandGroup(replacing: .newItem) { Button("새 작업") { model.store.newThread() }.keyboardShortcut("n") } }
     }
 }
@@ -37,6 +47,10 @@ struct ContentView: View {
     @State private var showingPlugins = false
     @State private var sidebarVisible = true
     @State private var inspectorVisible = true
+    @State private var renamingThread: ChatThread?
+    @State private var renameText = ""
+    @State private var deletingThread: ChatThread?
+    @State private var newWorkKind: WorkKind?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -48,6 +62,7 @@ struct ContentView: View {
                 header
                 messages
                 if let call = model.pendingCall { approval(call) }
+                if let question = model.pendingQuestion { AgentQuestionCard(question: question, model: model) }
                 composer
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -62,10 +77,36 @@ struct ContentView: View {
             PermissionSettingsView(store: model.permissions, usage: model.store.totalUsage,
                                    modelName: model.llama.selectedModel?.name ?? "모델 없음")
         }
-        .sheet(isPresented: $showingPlugins) { PluginDirectoryView(store: model.plugins) }
+        .sheet(isPresented: $showingPlugins) { PluginDirectoryView(model: model) }
+        .sheet(item: $newWorkKind) { kind in NewWorkView(kind: kind, store: model.store) }
         .alert("오류", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("확인", role: .cancel) {}
         } message: { Text(model.errorMessage ?? "") }
+        .alert("작업 이름 변경", isPresented: Binding(get: { renamingThread != nil }, set: { if !$0 { renamingThread = nil } })) {
+            TextField("작업 이름", text: $renameText)
+            Button("취소", role: .cancel) { renamingThread = nil }
+            Button("저장") {
+                if let thread = renamingThread { model.store.setTitle(renameText, for: thread.id) }
+                renamingThread = nil
+            }
+        }
+        .alert("작업을 삭제할까요?", isPresented: Binding(get: { deletingThread != nil }, set: { if !$0 { deletingThread = nil } })) {
+            Button("취소", role: .cancel) { deletingThread = nil }
+            Button("삭제", role: .destructive) {
+                if let thread = deletingThread { model.store.delete(Set([thread.id])) }
+                deletingThread = nil
+            }
+        } message: { Text("대화 기록만 삭제하며 작업 폴더의 파일은 유지합니다.") }
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button { withAnimation(.easeInOut(duration: 0.16)) { sidebarVisible.toggle() } } label: {
+                    Image(systemName: "sidebar.left")
+                }.help(sidebarVisible ? "사이드바 닫기" : "사이드바 열기")
+                Button { withAnimation(.easeInOut(duration: 0.18)) { inspectorVisible.toggle() } } label: {
+                    Image(systemName: "sidebar.right")
+                }.help(inspectorVisible ? "활동 패널 닫기" : "활동 패널 열기")
+            }
+        }
     }
 
     private var sidebar: some View {
@@ -75,21 +116,44 @@ struct ContentView: View {
                     .frame(width: 19, height: 19).accessibilityHidden(true)
                 Text("Opium").font(.title3.weight(.semibold))
                 Spacer()
-                Button(action: model.store.newThread) { Image(systemName: "square.and.pencil") }.buttonStyle(.plain)
             }
             .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 12)
-            Button(action: model.store.newThread) {
-                Label("새 작업", systemImage: "plus").frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12).padding(.vertical, 9)
+            VStack(spacing: 3) {
+                ForEach(WorkKind.allCases) { kind in
+                    Button {
+                        if kind == .task { model.store.newThread() } else { newWorkKind = kind }
+                    } label: {
+                        Label(kind.title, systemImage: kind.symbol)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 11).padding(.vertical, 7)
+                    }
+                    .buttonStyle(OpiumHoverButtonStyle())
+                }
             }
-            .buttonStyle(.plain).background(.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9)).padding(.horizontal, 10)
+            .font(.system(size: 14.5, weight: .medium))
+            .padding(5).background(Color.opiumPurpleMuted, in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 10)
             List(selection: $model.store.selectedID) {
                 Section("최근 작업") {
-                    ForEach(model.store.threads) { Text($0.title).lineLimit(1).tag($0.id) }
+                    ForEach(model.store.threads) { thread in
+                        Text(thread.title)
+                            .lineLimit(1).tag(thread.id)
+                            .contextMenu {
+                                Button("이름 변경", systemImage: "pencil") {
+                                    renameText = thread.title; renamingThread = thread
+                                }
+                                Button("Finder에서 작업 폴더 보기", systemImage: "folder") {
+                                    if let path = thread.workspacePath {
+                                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                                    }
+                                }
+                                Divider()
+                                Button("작업 삭제", systemImage: "trash", role: .destructive) { deletingThread = thread }
+                            }
+                    }
                         .onDelete { offsets in model.store.delete(Set(offsets.map { model.store.threads[$0].id })) }
                 }
             }
-            .font(.system(size: 14))
+            .font(.system(size: 15))
             .listStyle(.sidebar).scrollContentBackground(.hidden)
             Button { showingPlugins = true } label: {
                 HStack {
@@ -99,7 +163,7 @@ struct ContentView: View {
                     Text("\(model.plugins.plugins.filter(\.isEnabled).count)")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
-            }.buttonStyle(.plain)
+            }.buttonStyle(OpiumHoverButtonStyle())
             Divider().opacity(0.5)
             Button { showingPermissions = true } label: {
                 HStack {
@@ -108,33 +172,24 @@ struct ContentView: View {
                     Spacer()
                     Text(model.permissions.policy.title).font(.caption).foregroundStyle(.secondary)
                 }.contentShape(Rectangle()).padding(14)
-            }.buttonStyle(.plain)
+            }.buttonStyle(OpiumHoverButtonStyle())
         }.background(Color(nsColor: .windowBackgroundColor).opacity(0.68))
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.16)) { sidebarVisible.toggle() }
-            } label: {
-                Image(systemName: "sidebar.left")
-            }
-            .buttonStyle(.plain).help(sidebarVisible ? "사이드바 닫기" : "사이드바 열기")
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.store.selected?.title ?? "새 작업").font(.system(size: 15, weight: .semibold)).lineLimit(1)
-                Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                Text(model.store.selected?.title ?? "새 작업").font(.system(size: 16, weight: .semibold)).lineLimit(1)
+                Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             HStack(spacing: 6) {
                 Circle().fill(model.llama.isRunning ? .green : .secondary).frame(width: 7, height: 7)
                 Text(model.llama.status).font(.caption)
             }.padding(.horizontal, 10).padding(.vertical, 6).background(.secondary.opacity(0.09), in: Capsule())
-            Button { showingPermissions = true } label: { Image(systemName: "gearshape") }.buttonStyle(.plain)
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) { inspectorVisible.toggle() }
-            } label: { Image(systemName: "sidebar.right") }
-                .buttonStyle(.plain).help(inspectorVisible ? "활동 패널 닫기" : "활동 패널 열기")
-        }.padding(.horizontal, 24).frame(height: 64).background(.bar)
+            Button { showingPermissions = true } label: { Image(systemName: "gearshape") }
+                .buttonStyle(OpiumHoverButtonStyle(compact: true)).help("권한 및 설정")
+        }.padding(.horizontal, 24).frame(height: 56).background(.bar)
     }
 
     private var messages: some View {
@@ -144,7 +199,8 @@ struct ContentView: View {
             ScrollView {
                 if model.store.selected?.messages.isEmpty != false {
                     VStack(spacing: 12) {
-                        Image(systemName: "sparkles").font(.system(size: 30)).foregroundStyle(.secondary)
+                        OpiumMark().stroke(Color.opiumPurple.opacity(0.72), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
+                            .frame(width: 34, height: 34)
                         Text("무엇을 함께 해볼까요?").font(.title2.weight(.medium))
                         Text("대화하거나, 파일을 첨부하거나, Mac의 작업을 맡겨보세요.").foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, minHeight: 380)
@@ -162,7 +218,7 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("모델 로드 중").font(.system(size: 15, weight: .medium))
                                     Text(model.llama.selectedModel?.displayName ?? "로컬 모델")
-                                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                                        .font(.system(size: 13)).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -177,7 +233,7 @@ struct ContentView: View {
                                         Text("\(activity.title)  ·  \(context.date.timeIntervalSince(activity.date), format: .number.precision(.fractionLength(1)))초")
                                             .font(.system(size: 14, weight: .medium)).foregroundStyle(.secondary)
                                         if let detail = activity.detail, !detail.isEmpty {
-                                            Text(detail).font(.system(size: 12, design: .monospaced))
+                                            Text(detail).font(.system(size: 13, design: .monospaced))
                                                 .foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                                         }
                                     }
@@ -188,7 +244,7 @@ struct ContentView: View {
                         if model.llama.isGenerating, model.inlineActivity == nil {
                             HStack(spacing: 8) {
                                 OpiumLoader()
-                                Text("응답 작성 중").font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                                Text("응답 작성 중").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
                                 if !model.activeChangeStats.isEmpty { ChangeCountView(stats: model.activeChangeStats) }
                             }
                         }
@@ -275,23 +331,31 @@ struct ContentView: View {
                 }.buttonStyle(.plain)
                 Spacer()
                 Menu {
-                    ForEach(model.llama.models) { item in
-                        Button { Task { await model.selectModel(item) } } label: {
-                            if model.llama.selectedModel == item { Label(item.displayName, systemImage: "checkmark") }
-                            else { Text(item.displayName) }
+                    Menu("모델") {
+                        ForEach(model.llama.models) { item in
+                            Button { Task { await model.selectModel(item) } } label: {
+                                if model.llama.selectedModel == item { Label(item.displayName, systemImage: "checkmark") }
+                                else { Text(item.displayName) }
+                            }
+                        }
+                        Divider(); Button("모델 다시 찾기", action: model.llama.discoverModels)
+                    }
+                    Menu("추론 강도") {
+                        ForEach(ReasoningEffort.allCases) { effort in
+                            Button { model.llama.effort = effort } label: {
+                                if model.llama.effort == effort { Label(effort.rawValue, systemImage: "checkmark") }
+                                else { Text(effort.rawValue) }
+                            }
                         }
                     }
-                    Divider(); Button("모델 다시 찾기", action: model.llama.discoverModels)
-                } label: { Text(model.llama.selectedModel?.displayName ?? "모델 선택").lineLimit(1) }
-                    .disabled(model.llama.isGenerating)
-                Menu {
-                    ForEach(ReasoningEffort.allCases) { effort in
-                        Button { model.llama.effort = effort } label: {
-                            if model.llama.effort == effort { Label(effort.rawValue, systemImage: "checkmark") }
-                            else { Text(effort.rawValue) }
-                        }
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(model.llama.selectedModel?.displayName ?? "모델 선택").lineLimit(1)
+                        Text(model.llama.effort.rawValue).foregroundStyle(.secondary)
                     }
-                } label: { Text(model.llama.effort.rawValue) }
+                }
+                .disabled(model.llama.isGenerating)
+                .help("모델과 추론 강도 선택")
                 if model.llama.isGenerating,
                    !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty {
                     Button("다음에 보내기") { Task { await model.send() } }
@@ -328,6 +392,103 @@ struct ContentView: View {
                 }
             }
         }
+    }
+}
+
+private struct OpiumHoverButtonStyle: ButtonStyle {
+    var compact = false
+    func makeBody(configuration: Configuration) -> some View {
+        HoverBody(configuration: configuration, compact: compact)
+    }
+
+    private struct HoverBody: View {
+        let configuration: Configuration
+        let compact: Bool
+        @State private var hovering = false
+        var body: some View {
+            configuration.label
+                .padding(compact ? 7 : 0)
+                .background(Color.opiumPurple.opacity(hovering ? 0.12 : configuration.isPressed ? 0.18 : 0),
+                            in: RoundedRectangle(cornerRadius: 8))
+                .scaleEffect(configuration.isPressed ? 0.97 : 1)
+                .animation(.easeOut(duration: 0.12), value: hovering)
+                .onHover { hovering = $0 }
+        }
+    }
+}
+
+private struct NewWorkView: View {
+    let kind: WorkKind
+    @Bindable var store: ThreadStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = ""
+    @State private var workspacePath: String?
+    @State private var date = Date().addingTimeInterval(3_600)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Label(kind.title, systemImage: kind.symbol).font(.title2.weight(.semibold))
+            TextField("이름", text: $title).textFieldStyle(.roundedBorder)
+            if kind == .project {
+                HStack {
+                    Text(workspacePath ?? "전용 작업 폴더를 자동으로 만듭니다.")
+                        .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Button("폴더 선택") { chooseFolder() }
+                }
+            }
+            if kind == .scheduled || kind == .recurring {
+                DatePicker(kind == .recurring ? "첫 실행" : "실행 시각", selection: $date)
+                if kind == .recurring {
+                    Text("현재 프리뷰에서는 반복 계획을 저장합니다. 백그라운드 자동 실행은 앱이 실행 중일 때만 제공될 예정입니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            HStack {
+                Button("취소", role: .cancel) { dismiss() }
+                Spacer()
+                Button("만들기") {
+                    store.newThread(kind: kind, title: title.isEmpty ? nil : title,
+                                    workspacePath: workspacePath,
+                                    schedule: (kind == .scheduled || kind == .recurring)
+                                        ? WorkSchedule(date: date, repeats: kind == .recurring) : nil)
+                    dismiss()
+                }.buttonStyle(.borderedProminent).tint(.opiumPurple).keyboardShortcut(.defaultAction)
+            }
+        }.padding(24).frame(width: 480, height: 300)
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true
+        guard panel.runModal() == .OK else { return }
+        workspacePath = panel.url?.path
+    }
+}
+
+private struct AgentQuestionCard: View {
+    let question: AgentQuestion
+    @Bindable var model: AgentViewModel
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 9) {
+                OpiumMark().stroke(Color.opiumPurple, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
+                    .frame(width: 20, height: 20)
+                Text(question.question).font(.headline)
+            }
+            if let detail = question.detail, !detail.isEmpty {
+                Text(detail).font(.callout).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                ForEach(question.options, id: \.self) { option in
+                    Button(option) { Task { await model.answerQuestion(option) } }
+                        .buttonStyle(.bordered).tint(.opiumPurple)
+                }
+            }
+        }
+        .padding(16).background(Color.opiumPurpleSoft, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.opiumPurple.opacity(0.24)))
+        .frame(maxWidth: 820, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 8)
     }
 }
 
@@ -372,8 +533,7 @@ private struct ActivityInspector: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("보안 활동").font(.headline)
-                    Text("모델이 이 Mac에서 수행한 작업").font(.caption).foregroundStyle(.secondary)
+                    Text("보안 활동").font(.system(size: 18, weight: .semibold))
                 }
                 Spacer()
                 if model.llama.isGenerating { OpiumLoader() }
@@ -382,9 +542,7 @@ private struct ActivityInspector: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.activities.isEmpty {
-                        ContentUnavailableView("활동 없음", systemImage: "waveform.path",
-                                               description: Text("모델이 작업을 시작하면 여기에 표시됩니다."))
-                            .frame(minHeight: 220)
+                        Color.clear.frame(height: 1)
                     } else {
                         ForEach(model.activities.reversed()) { activity in
                             HStack(alignment: .top, spacing: 10) {
@@ -393,23 +551,23 @@ private struct ActivityInspector: View {
                                     .frame(width: 18)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        Text(activity.title).font(.system(size: 15, weight: .medium))
+                                        Text(activity.title).font(.system(size: 16, weight: .medium))
                                         if let level = activity.securityLevel {
-                                            Text(level.title).font(.system(size: 10, weight: .semibold))
+                                            Text(level.title).font(.system(size: 11, weight: .semibold))
                                                 .foregroundStyle(securityColor(level))
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                                 .background(securityColor(level).opacity(0.12), in: Capsule())
                                         }
                                     }
                                     if let detail = activity.detail, !detail.isEmpty {
-                                        Text(detail).font(.system(size: 13)).foregroundStyle(.secondary)
+                                        Text(detail).font(.system(size: 14)).foregroundStyle(.secondary)
                                             .lineLimit(2).truncationMode(.middle)
                                     }
                                     if let outcome = activity.outcome, !outcome.isEmpty {
-                                        Text(outcome).font(.system(size: 12)).foregroundStyle(.secondary)
+                                        Text(outcome).font(.system(size: 13)).foregroundStyle(.secondary)
                                             .lineLimit(2).truncationMode(.middle)
                                     }
-                                    Text(activity.date, style: .time).font(.system(size: 12)).foregroundStyle(.tertiary)
+                                    Text(activity.date, style: .time).font(.system(size: 13)).foregroundStyle(.tertiary)
                                 }
                                 Spacer(minLength: 0)
                                 if activity.isActive { Circle().fill(.green).frame(width: 6, height: 6).padding(.top, 5) }
@@ -446,22 +604,22 @@ private struct ResourcePanel: View {
                 Text("메모리").font(.headline)
                 Spacer()
                 Text("\(bytes(totalUsage)) / \(bytes(snapshot.physicalBytes))")
-                    .font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                    .font(.system(size: 14, design: .monospaced)).foregroundStyle(.secondary)
             }
             MemoryGraph(values: snapshot.history)
                 .frame(height: 42)
             HStack(spacing: 18) {
-                utilization("CPU", snapshot.cpuUsage, .blue)
+                utilization("CPU", snapshot.cpuUsage, Color.opiumPurple.opacity(0.62))
                 utilization("GPU", snapshot.gpuUsage, .opiumPurple)
             }
             HStack {
                 Label("온도 상태", systemImage: "thermometer.medium").foregroundStyle(.secondary)
                 Spacer()
                 Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
-            }.font(.system(size: 13))
+            }.font(.system(size: 14))
             VStack(spacing: 7) {
                 resourceRow("모델 프로세스", snapshot.modelBytes, .opiumPurple)
-                resourceRow("Opium", snapshot.appBytes, .blue)
+                resourceRow("Opium", snapshot.appBytes, Color.opiumPurple.opacity(0.62))
                 if let selected = model.llama.selectedModel {
                     HStack {
                         Text("모델 파일").foregroundStyle(.secondary)
@@ -474,17 +632,17 @@ private struct ResourcePanel: View {
                 }
                 HStack {
                     Text("컨텍스트").foregroundStyle(.secondary)
-                    Spacer(); Text("\(model.liveMetrics.promptTokens.formatted()) / 32K").monospacedDigit()
+                    Spacer(); Text("\(model.liveMetrics.promptTokens.formatted()) / \(model.llama.lowPowerMode ? "16K" : "32K")").monospacedDigit()
                 }
                 HStack {
                     Text("생성 속도").foregroundStyle(.secondary)
                     Spacer(); Text(String(format: "%.1f tok/s", model.liveMetrics.tokensPerSecond)).monospacedDigit()
                 }
-            }.font(.system(size: 13))
+            }.font(.system(size: 14))
             if model.llama.isRunning {
                 Button { model.llama.stop() } label: {
                     Label("모델 언로드", systemImage: "power")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(.orange).controlSize(.large)
@@ -502,7 +660,7 @@ private struct ResourcePanel: View {
                 Text(value.map { "\(Int($0 * 100))%" } ?? "—").monospacedDigit()
             }
             ProgressView(value: value ?? 0).tint(color)
-        }.font(.system(size: 13)).frame(maxWidth: .infinity)
+        }.font(.system(size: 14)).frame(maxWidth: .infinity)
     }
 
     private func resourceRow(_ title: String, _ value: UInt64, _ color: Color) -> some View {
@@ -631,7 +789,7 @@ private struct MarkdownMessageView: View {
                 }
             }
         }
-        .font(.system(size: 16.5)).lineSpacing(6).textSelection(.enabled)
+        .font(.system(size: 15.5)).lineSpacing(5).textSelection(.enabled)
     }
 
     private func listCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -841,7 +999,7 @@ private struct PermissionSettingsView: View {
             }
             HStack(spacing: 16) {
                 Label("파일", systemImage: "folder").foregroundStyle(.green)
-                Label("Apple Mail", systemImage: "envelope").foregroundStyle(.blue)
+                Label("Apple Mail", systemImage: "envelope").foregroundStyle(Color.opiumPurple.opacity(0.72))
                 Label("웹 읽기/제작", systemImage: "globe").foregroundStyle(Color.opiumPurple)
             }.font(.caption)
         }.padding(26).frame(width: 600, height: 620)
@@ -857,7 +1015,8 @@ private struct PermissionSettingsView: View {
 }
 
 private struct PluginDirectoryView: View {
-    @Bindable var store: PluginStore
+    @Bindable var model: AgentViewModel
+    private var store: PluginStore { model.plugins }
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -888,30 +1047,32 @@ private struct PluginDirectoryView: View {
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(alignment: .top, spacing: 12) {
                                     RoundedRectangle(cornerRadius: 10).fill(Color.opiumPurple.opacity(0.14))
-                                        .overlay(Image(systemName: plugin.isBuiltIn ? "syringe.fill" : "puzzlepiece.extension.fill")
+                                        .overlay(Image(systemName: kitSymbol(plugin))
                                             .foregroundStyle(Color.opiumPurple))
                                         .frame(width: 44, height: 44)
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack(spacing: 7) {
                                             Text(plugin.displayName).font(.headline)
                                             if plugin.isBuiltIn {
-                                                Text("기본 제공").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
+                                                Text("Opium 제공").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
                                                     .padding(.horizontal, 6).padding(.vertical, 3)
                                                     .background(Color.opiumPurple.opacity(0.12), in: Capsule())
                                             }
                                         }
-                                        Text(plugin.summary).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                                        Text(plugin.summary).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(2)
                                         HStack(spacing: 6) {
                                             capability("Skill \(plugin.skillURLs.count)", active: !plugin.skillURLs.isEmpty)
-                                            capability(plugin.isBuiltIn ? "기본 도구 11" : "MCP", active: plugin.isBuiltIn || plugin.hasMCP)
+                                            capability(plugin.manifest.name == "adrenaline-kit" ? "기본 도구 11" : (plugin.isBuiltIn ? "효율 프로필" : "MCP"),
+                                                       active: plugin.isBuiltIn || plugin.hasMCP)
                                             capability("Hooks", active: plugin.hasHooks)
                                             if let version = plugin.manifest.version { capability("v\(version)", active: true) }
                                         }
                                     }
                                     Spacer()
                                     Toggle("", isOn: Binding(get: { plugin.isEnabled },
-                                                             set: { store.setEnabled($0, for: plugin) }))
-                                        .labelsHidden().toggleStyle(.switch).disabled(plugin.isBuiltIn)
+                                                             set: { enabled in Task { await model.setPluginEnabled(enabled, for: plugin) } }))
+                                        .labelsHidden().toggleStyle(.switch)
+                                        .disabled(plugin.manifest.name == "adrenaline-kit")
                                     if !plugin.isBuiltIn {
                                         Menu {
                                             Button("폴더에서 보기") { NSWorkspace.shared.activateFileViewerSelecting([plugin.rootURL]) }
@@ -921,7 +1082,7 @@ private struct PluginDirectoryView: View {
                                     }
                                 }
                                 if plugin.isBuiltIn {
-                                    Label("Opium 보안 정책과 활동 로그를 통해 항상 안전하게 실행됩니다.", systemImage: "bolt.shield.fill")
+                                    Label(kitNote(plugin), systemImage: plugin.manifest.name == "melatonin-kit" ? "leaf.fill" : "bolt.shield.fill")
                                         .font(.caption).foregroundStyle(Color.opiumPurple)
                                 } else if plugin.hasMCP || plugin.hasHooks {
                                     Label("MCP와 Hooks는 현재 자동 실행되지 않습니다.", systemImage: "shield.lefthalf.filled")
@@ -938,13 +1099,26 @@ private struct PluginDirectoryView: View {
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                                 ForEach(Self.catalog) { item in
                                     HStack(spacing: 10) {
-                                        Image(systemName: item.symbol).frame(width: 22).foregroundStyle(Color.opiumPurple)
+                                        AsyncImage(url: item.iconURL) { image in
+                                            image.resizable().scaledToFit()
+                                        } placeholder: {
+                                            Image(systemName: item.symbol).foregroundStyle(Color.opiumPurple)
+                                        }
+                                        .frame(width: 22, height: 22)
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.name).font(.system(size: 13, weight: .semibold))
-                                            Text(item.detail).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                            Text(item.name).font(.system(size: 14, weight: .semibold))
+                                            Text(item.detail).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                         Spacer()
-                                        Text("연결 필요").font(.caption2).foregroundStyle(.tertiary)
+                                        if store.isInstalled(item.id) {
+                                            Text("설치됨").font(.caption2.weight(.medium)).foregroundStyle(Color.opiumPurple)
+                                        } else {
+                                            Button("설치") {
+                                                store.installFromCatalog(name: item.id, displayName: item.name,
+                                                                         summary: item.detail,
+                                                                         documentationURL: item.documentation.absoluteString)
+                                            }.buttonStyle(.bordered).controlSize(.small).tint(.opiumPurple)
+                                        }
                                     }
                                     .padding(11).background(Color.opiumPurple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
                                 }
@@ -968,23 +1142,42 @@ private struct PluginDirectoryView: View {
             .background(.secondary.opacity(active ? 0.12 : 0.05), in: Capsule())
     }
 
+    private func kitSymbol(_ plugin: InstalledPlugin) -> String {
+        switch plugin.manifest.name {
+        case "adrenaline-kit": "syringe.fill"
+        case "caffeine-kit": "cup.and.saucer.fill"
+        case "melatonin-kit": "moon.zzz.fill"
+        default: "puzzlepiece.extension.fill"
+        }
+    }
+
+    private func kitNote(_ plugin: InstalledPlugin) -> String {
+        switch plugin.manifest.name {
+        case "caffeine-kit": "불필요한 설명과 도구 호출을 줄여 토큰을 절약합니다."
+        case "melatonin-kit": "16K 컨텍스트와 제한된 CPU 스레드로 부하와 발열을 낮춥니다."
+        default: "Opium 보안 정책과 활동 로그를 통해 항상 안전하게 실행됩니다."
+        }
+    }
+
     private struct CatalogItem: Identifiable {
-        let name: String, detail: String, symbol: String
-        var id: String { name }
+        let id: String, name: String, detail: String, symbol: String
+        let domain: String
+        let documentation: URL
+        var iconURL: URL? { URL(string: "https://\(domain)/favicon.ico") }
     }
 
     private static let catalog = [
-        CatalogItem(name: "Gmail", detail: "메일 검색·요약·초안", symbol: "envelope.fill"),
-        CatalogItem(name: "Google Drive", detail: "파일 검색·문서 읽기", symbol: "externaldrive.fill"),
-        CatalogItem(name: "Google Calendar", detail: "일정 조회·생성", symbol: "calendar"),
-        CatalogItem(name: "Notion", detail: "페이지·데이터베이스", symbol: "doc.text.fill"),
-        CatalogItem(name: "GitHub", detail: "저장소·이슈·PR", symbol: "chevron.left.forwardslash.chevron.right"),
-        CatalogItem(name: "Slack", detail: "채널 검색·메시지", symbol: "number"),
-        CatalogItem(name: "Linear", detail: "이슈·프로젝트 관리", symbol: "line.3.horizontal.decrease.circle"),
-        CatalogItem(name: "Figma", detail: "디자인 파일·코멘트", symbol: "paintbrush.fill"),
-        CatalogItem(name: "Dropbox", detail: "클라우드 파일", symbol: "shippingbox.fill"),
-        CatalogItem(name: "PostgreSQL", detail: "스키마·쿼리", symbol: "cylinder.fill"),
-        CatalogItem(name: "Sentry", detail: "오류·성능 분석", symbol: "exclamationmark.triangle.fill"),
-        CatalogItem(name: "Stripe", detail: "결제 데이터 조회", symbol: "creditcard.fill")
+        CatalogItem(id: "gmail", name: "Gmail", detail: "메일 검색·요약·초안", symbol: "envelope.fill", domain: "mail.google.com", documentation: URL(string: "https://developers.google.com/gmail/api")!),
+        CatalogItem(id: "google-drive", name: "Google Drive", detail: "파일 검색·문서 읽기", symbol: "externaldrive.fill", domain: "drive.google.com", documentation: URL(string: "https://developers.google.com/drive")!),
+        CatalogItem(id: "google-calendar", name: "Google Calendar", detail: "일정 조회·생성", symbol: "calendar", domain: "calendar.google.com", documentation: URL(string: "https://developers.google.com/calendar")!),
+        CatalogItem(id: "notion", name: "Notion", detail: "페이지·데이터베이스", symbol: "doc.text.fill", domain: "www.notion.so", documentation: URL(string: "https://developers.notion.com")!),
+        CatalogItem(id: "github", name: "GitHub", detail: "저장소·이슈·PR", symbol: "chevron.left.forwardslash.chevron.right", domain: "github.com", documentation: URL(string: "https://docs.github.com")!),
+        CatalogItem(id: "slack", name: "Slack", detail: "채널 검색·메시지", symbol: "number", domain: "slack.com", documentation: URL(string: "https://api.slack.com")!),
+        CatalogItem(id: "linear", name: "Linear", detail: "이슈·프로젝트 관리", symbol: "line.3.horizontal.decrease.circle", domain: "linear.app", documentation: URL(string: "https://developers.linear.app")!),
+        CatalogItem(id: "figma", name: "Figma", detail: "디자인 파일·코멘트", symbol: "paintbrush.fill", domain: "www.figma.com", documentation: URL(string: "https://www.figma.com/developers/api")!),
+        CatalogItem(id: "dropbox", name: "Dropbox", detail: "클라우드 파일", symbol: "shippingbox.fill", domain: "www.dropbox.com", documentation: URL(string: "https://www.dropbox.com/developers")!),
+        CatalogItem(id: "postgresql", name: "PostgreSQL", detail: "스키마·쿼리", symbol: "cylinder.fill", domain: "www.postgresql.org", documentation: URL(string: "https://www.postgresql.org/docs/")!),
+        CatalogItem(id: "sentry", name: "Sentry", detail: "오류·성능 분석", symbol: "exclamationmark.triangle.fill", domain: "sentry.io", documentation: URL(string: "https://docs.sentry.io")!),
+        CatalogItem(id: "stripe", name: "Stripe", detail: "결제 데이터 조회", symbol: "creditcard.fill", domain: "stripe.com", documentation: URL(string: "https://docs.stripe.com")!)
     ]
 }

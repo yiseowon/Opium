@@ -1,0 +1,13 @@
+{
+  "name": "caffeine-kit",
+  "version": "0.1.0",
+  "description": "토큰 낭비와 불필요한 작업을 줄이는 Opium 효율화 스킬 모음",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Caffeine Kit",
+    "shortDescription": "짧고 빠르게 끝내는 토큰 절약 모드",
+    "developerName": "Opium",
+    "category": "Efficiency",
+    "brandColor": "#C98B42"
+  }
+}

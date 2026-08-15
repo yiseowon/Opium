@@ -6,15 +6,17 @@ final class ThreadStore {
     var threads: [ChatThread] = []
     var selectedID: UUID?
 
-    private let fileURL: URL = {
-        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "LocalAgent", directoryHint: .isDirectory)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        return directory.appending(path: "threads.json")
-    }()
+    private let fileURL: URL
+    private let workspaceRoot: URL
 
-    init() {
-        if let data = try? Data(contentsOf: fileURL),
+    init(fileURL: URL? = nil, workspaceRoot: URL? = nil) {
+        let directory = fileURL?.deletingLastPathComponent()
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appending(path: "LocalAgent", directoryHint: .isDirectory)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        self.fileURL = fileURL ?? directory.appending(path: "threads.json")
+        self.workspaceRoot = workspaceRoot ?? FileManager.default.homeDirectoryForCurrentUser.appending(path: "LLM")
+        if let data = try? Data(contentsOf: self.fileURL),
            let saved = try? JSONDecoder().decode([ChatThread].self, from: data) {
             threads = saved
             selectedID = saved.first?.id
@@ -38,9 +40,12 @@ final class ThreadStore {
         }
     }
 
-    func newThread() {
+    func newThread(kind: WorkKind = .task, title: String? = nil,
+                   workspacePath: String? = nil, schedule: WorkSchedule? = nil) {
         let id = UUID()
-        let thread = ChatThread(id: id, title: "새 작업", workspacePath: makeWorkspace(for: id))
+        let thread = ChatThread(id: id, title: title ?? kind.title,
+                                workspacePath: workspacePath ?? makeWorkspace(for: id),
+                                kind: kind, schedule: schedule)
         threads.insert(thread, at: 0)
         selectedID = thread.id
         save()
@@ -55,7 +60,9 @@ final class ThreadStore {
 
     func setTitle(_ title: String, for id: UUID) {
         guard let index = threads.firstIndex(where: { $0.id == id }) else { return }
-        threads[index].title = title
+        let value = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        threads[index].title = String(value.prefix(80))
         save()
     }
 
@@ -106,7 +113,7 @@ final class ThreadStore {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd/HHmmss"
         let relative = formatter.string(from: .now) + "-" + id.uuidString.prefix(6)
-        let url = FileManager.default.homeDirectoryForCurrentUser.appending(path: "LLM").appending(path: relative)
+        let url = workspaceRoot.appending(path: relative)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
     }

@@ -5,7 +5,42 @@ struct ChatThread: Identifiable, Codable, Hashable {
     var title: String
     var messages: [ChatMessage] = []
     var workspacePath: String? = nil
+    var kind: WorkKind? = nil
+    var schedule: WorkSchedule? = nil
     var updatedAt = Date()
+}
+
+enum WorkKind: String, CaseIterable, Codable, Hashable, Identifiable {
+    case task, project, recurring, scheduled
+    var id: Self { self }
+    var title: String {
+        switch self {
+        case .task: "새 작업"
+        case .project: "새 프로젝트"
+        case .recurring: "반복 작업"
+        case .scheduled: "예약 작업"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .task: "square.and.pencil"
+        case .project: "folder.badge.plus"
+        case .recurring: "repeat"
+        case .scheduled: "calendar.badge.clock"
+        }
+    }
+}
+
+struct WorkSchedule: Codable, Hashable {
+    var date: Date
+    var repeats: Bool
+}
+
+struct AgentQuestion: Identifiable, Hashable {
+    let id: String
+    let question: String
+    let detail: String?
+    let options: [String]
 }
 
 struct ChatMessage: Identifiable, Codable, Hashable {

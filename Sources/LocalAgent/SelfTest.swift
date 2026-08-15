@@ -36,6 +36,14 @@ enum SelfTest {
         let partialArguments = #"{"path":"/workspace/site/assets/app.js","content":"ok\nnext\nthi"#
         let liveStat = FileTools.liveChangeStat(arguments: partialArguments, workspace: directory.path)
         precondition(liveStat?.path == nested.path && liveStat?.additions == 2 && liveStat?.deletions == 0)
+        let trailingNewlineArguments = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "path": "/workspace/one-line.txt", "content": "PASS\n"
+        ]), as: UTF8.self)
+        let trailingNewlineStat = FileTools.changeStat(
+            for: PendingToolCall(id: "newline", name: "write_file", arguments: trailingNewlineArguments),
+            workspace: directory.path
+        )
+        precondition(trailingNewlineStat?.additions == 1 && trailingNewlineStat?.deletions == 0)
         let toolArguments = String(decoding: try JSONSerialization.data(withJSONObject: ["path": file.path]), as: UTF8.self)
         let toolPaths = FileTools.paths(in: .init(id: "paths", name: "read_file", arguments: toolArguments))
         precondition(toolPaths == [file.path])
@@ -47,6 +55,24 @@ enum SelfTest {
         """
         let legacyMessage = try JSONDecoder().decode(ChatMessage.self, from: Data(legacy.utf8))
         precondition(legacyMessage.attachments == nil && legacyMessage.metrics == nil)
+        let legacyThread = """
+        {"id":"00000000-0000-0000-0000-000000000002","title":"이전 작업","messages":[],"updatedAt":0}
+        """
+        let decodedLegacyThread = try JSONDecoder().decode(ChatThread.self, from: Data(legacyThread.utf8))
+        precondition(decodedLegacyThread.kind == nil && decodedLegacyThread.schedule == nil)
+        let threadFile = directory.appending(path: "store/threads.json")
+        let threadWorkspaces = directory.appending(path: "workspaces")
+        let threadStore = ThreadStore(fileURL: threadFile, workspaceRoot: threadWorkspaces)
+        precondition(threadStore.threads.count == 1 && threadStore.selected != nil)
+        let schedule = WorkSchedule(date: Date(timeIntervalSince1970: 1234), repeats: true)
+        threadStore.newThread(kind: .recurring, title: "  정기 정리  ", schedule: schedule)
+        let recurringID = try require(threadStore.selected?.id, "반복 작업이 선택되지 않았습니다.")
+        threadStore.setTitle("새 이름", for: recurringID)
+        precondition(threadStore.selected?.title == "새 이름" && threadStore.selected?.schedule == schedule)
+        let reloadedStore = ThreadStore(fileURL: threadFile, workspaceRoot: threadWorkspaces)
+        precondition(reloadedStore.selected?.kind == .recurring && reloadedStore.selected?.schedule == schedule)
+        reloadedStore.delete(Set([recurringID]))
+        precondition(!reloadedStore.threads.isEmpty && reloadedStore.threads.allSatisfy { $0.id != recurringID })
 
         let attachment = MessageAttachment(name: "hello.txt", path: file.path, size: 5, content: "hello")
         let encoded = try JSONEncoder().encode(ChatMessage(role: .user, content: "read", attachments: [attachment]))
@@ -113,6 +139,18 @@ enum SelfTest {
         try Data("---\nname: concise\n---\nBe concise.".utf8).write(to: skillDirectory.appending(path: "SKILL.md"))
         let plugin = try PluginStore.loadPlugin(at: pluginRoot, enabled: true)
         precondition(plugin.manifest.name == "sample-plugin" && plugin.skillURLs.count == 1 && plugin.isEnabled)
+        let builtInRoot = [
+            Bundle.main.resourceURL?.appending(path: "BuiltInPlugins"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appending(path: "BuiltInPlugins")
+        ].compactMap { $0 }.first { FileManager.default.fileExists(atPath: $0.path) }
+        guard let builtInRoot else { throw AgentError.message("BuiltInPlugins 리소스를 찾지 못했습니다.") }
+        for kit in ["caffeine-kit", "melatonin-kit"] {
+            let builtIn = try PluginStore.loadPlugin(
+                at: builtInRoot.appending(path: kit),
+                enabled: true, isBuiltIn: true
+            )
+            precondition(builtIn.manifest.name == kit && builtIn.skillURLs.count == 1 && builtIn.isBuiltIn)
+        }
         try Data(#"{"name":"unsafe-plugin","skills":"../../"}"#.utf8)
             .write(to: manifestDirectory.appending(path: "plugin.json"))
         do {
@@ -120,5 +158,10 @@ enum SelfTest {
             preconditionFailure("플러그인 외부 경로가 거절되어야 합니다.")
         } catch { }
         print("Self-test passed")
+    }
+
+    private static func require<T>(_ value: T?, _ message: String) throws -> T {
+        guard let value else { throw AgentError.message(message) }
+        return value
     }
 }

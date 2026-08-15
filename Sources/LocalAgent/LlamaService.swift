@@ -15,6 +15,7 @@ final class LlamaService {
     var isRunning = false
     var isGenerating = false
     var isStarting = false
+    var lowPowerMode = false
     var effort: ReasoningEffort {
         didSet { UserDefaults.standard.set(effort.rawValue, forKey: "reasoningEffort") }
     }
@@ -72,9 +73,10 @@ final class LlamaService {
         process.arguments = [
             "--model", model.url.path,
             "--host", "127.0.0.1", "--port", String(port),
-            "--ctx-size", "32768", "--jinja", "--flash-attn", "on", "--api-key", apiKey,
+            "--ctx-size", lowPowerMode ? "16384" : "32768", "--jinja", "--flash-attn", "on", "--api-key", apiKey,
             "--alias", model.name
         ]
+        if lowPowerMode { process.arguments?.append(contentsOf: ["--threads", "4", "--threads-batch", "4"]) }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         try process.run()
@@ -162,6 +164,7 @@ final class LlamaService {
                             - Treat pre-tool text as a concise progress update, not a partial final answer. After tools finish, produce one corrected, coherent final answer instead of repeating those updates.
                             - Keep reasoning focused on the next decision. The UI separately presents reasoning and tool activity.
                             - Do not ask for permission in prose; the app handles approvals.
+                            - When a real user preference blocks progress, call ask_user once with 2–4 short, mutually exclusive options separated by `|`. Continue immediately after the user selects one.
                             - Default workspace: `\(workspacePath)`. When the user does not give an exact folder, create and edit everything inside this workspace.
                             - Never invent `/runner`, `/workspace`, or other root-level project paths. Use the default workspace instead.
                             - Current reasoning effort is `\(effort.rawValue)`: \(effort.instruction)
@@ -188,7 +191,7 @@ final class LlamaService {
                         "temperature": 0.1,
                         "top_p": 0.8,
                         "repeat_penalty": 1.08,
-                        "max_tokens": effort.maxTokens,
+                        "max_tokens": lowPowerMode ? min(effort.maxTokens, 4_096) : effort.maxTokens,
                         "chat_template_kwargs": templateOptions
                     ])
 
@@ -299,6 +302,9 @@ final class LlamaService {
     }
 
     private static let toolsJSON: [[String: Any]] = [
+        tool("ask_user", "Ask one concise multiple-choice question only when a user decision is required to continue.", [
+            "question": "One short question", "detail": "Why this decision is needed", "options": "2 to 4 short options separated by |"
+        ]),
         tool("search_files", "Search file names recursively under a directory.", [
             "path": "Exact absolute directory path", "query": "Case-insensitive file-name substring"
         ]),
