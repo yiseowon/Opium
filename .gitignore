@@ -10,3 +10,6 @@ Models/*
 task_plan.md
 findings.md
 progress.md
+*.pptx.inspect.ndjson
+~$*.pptx
+Dist/

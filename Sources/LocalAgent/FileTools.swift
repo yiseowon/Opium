@@ -2,6 +2,25 @@ import AppKit
 import Foundation
 
 enum FileTools {
+    static func securityLevel(for call: PendingToolCall, workspace: String? = nil) -> SecurityLevel {
+        if call.name == "run_command" || call.name == "trash_file" { return .critical }
+        if call.name == "search_mail" || call.name == "fetch_url" || call.name == "web_search" { return .sensitive }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        let workspacePath = workspace.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        let critical = ["/.ssh", "/.gnupg", "/Library/Keychains", "/Library/Mail", "/Library/Messages"]
+        let sensitive = ["/Desktop", "/Documents", "/Downloads", "/Pictures", "/Movies", "/Music", "/Library"]
+        for path in paths(in: call, workspace: workspace).map({ URL(fileURLWithPath: $0).standardizedFileURL.path }) {
+            if let workspacePath, path == workspacePath || path.hasPrefix(workspacePath + "/") { continue }
+            if critical.contains(where: { path == home + $0 || path.hasPrefix(home + $0 + "/") })
+                || ["/System", "/Library", "/private", "/etc"].contains(where: { path == $0 || path.hasPrefix($0 + "/") }) {
+                return .critical
+            }
+            if sensitive.contains(where: { path == home + $0 || path.hasPrefix(home + $0 + "/") }) { return .sensitive }
+            if !path.hasPrefix(home + "/") && path != home { return .critical }
+        }
+        return .normal
+    }
+
     static func requiresApproval(_ name: String) -> Bool {
         ["write_file", "create_directory", "move_file", "trash_file", "run_command"].contains(name)
     }
@@ -17,8 +36,28 @@ enum FileTools {
         case "run_command": return ("터미널 명령 실행", arguments["working_directory"] ?? "터미널", arguments["command"] ?? call.arguments)
         case "search_mail": return ("메일 검색", arguments["query"] ?? "최근 메일", "Apple Mail에서 읽기만 수행합니다.")
         case "fetch_url": return ("웹페이지 읽기", arguments["url"] ?? "웹", "페이지 내용을 읽고 변경하지 않습니다.")
+        case "web_search": return ("웹 검색", arguments["query"] ?? "검색어", "공개 검색 결과의 제목과 주소를 읽습니다.")
         default: return (call.name, target.isEmpty ? call.arguments : target, "이 작업을 실행합니다.")
         }
+    }
+
+    static func liveTitle(for call: PendingToolCall) -> String {
+        let arguments = decodedArguments(call.arguments)
+        guard call.name == "run_command" else {
+            return ["read_file": "파일 읽는 중", "list_files": "폴더 확인 중", "search_files": "파일 검색 중",
+                    "write_file": "파일 수정 중", "create_directory": "폴더 생성 중", "move_file": "파일 이동 중",
+                    "trash_file": "휴지통으로 이동 중", "search_mail": "메일 검색 중",
+                    "fetch_url": "웹페이지 확인 중", "web_search": "웹 검색 중"][call.name] ?? "도구 실행 중"
+        }
+
+        let command = (arguments["command"] ?? "").lowercased()
+        let server = command.contains("http.server") || command.contains("python -m http")
+        let safari = command.contains("safari") || command.contains("open http")
+        let stopping = command.contains("pkill") || command.contains("kill ") || command.contains("killall")
+        if server && safari { return stopping ? "로컬 서버를 종료하고 Safari를 정리하는 중" : "로컬 서버를 시작하고 Safari에서 여는 중" }
+        if server { return stopping ? "로컬 서버 종료 중" : "로컬 서버 시작 중" }
+        if safari { return command.contains("close") || command.contains("quit") ? "Safari 창 닫는 중" : "Safari에서 여는 중" }
+        return "터미널 명령 실행 중"
     }
 
     static func changeStat(for call: PendingToolCall, workspace: String? = nil) -> FileChangeStat? {
@@ -27,8 +66,8 @@ enum FileTools {
         guard let rawPath = arguments["path"], let newContent = arguments["content"] else { return nil }
         let path = normalizedPath(rawPath, workspace: workspace)
         let oldContent = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
-        let newLines = newContent.isEmpty ? [] : newContent.components(separatedBy: .newlines)
-        let oldLines = oldContent.isEmpty ? [] : oldContent.components(separatedBy: .newlines)
+        let newLines = lines(in: newContent)
+        let oldLines = lines(in: oldContent)
         let difference = newLines.difference(from: oldLines)
         var additions = 0
         var deletions = 0
@@ -39,6 +78,55 @@ enum FileTools {
             }
         }
         return FileChangeStat(path: path, additions: additions, deletions: deletions)
+    }
+
+    static func liveChangeStat(arguments: String, workspace: String? = nil) -> FileChangeStat? {
+        guard let rawPath = partialJSONString(named: "path", in: arguments, requireClosingQuote: true),
+              let newContent = partialJSONString(named: "content", in: arguments) else { return nil }
+        let path = normalizedPath(rawPath, workspace: workspace)
+        let oldContent = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        let newLines = lines(in: newContent)
+        let oldLines = lines(in: oldContent)
+        let difference = newLines.difference(from: Array(oldLines.prefix(newLines.count)))
+        var additions = 0, deletions = 0
+        for change in difference {
+            if case .insert = change { additions += 1 } else { deletions += 1 }
+        }
+        return FileChangeStat(path: path, additions: additions, deletions: deletions)
+    }
+
+    private static func partialJSONString(named key: String, in json: String,
+                                          requireClosingQuote: Bool = false) -> String? {
+        guard let keyRange = json.range(of: "\"\(key)\"") else { return nil }
+        var index = keyRange.upperBound
+        while index < json.endIndex, json[index].isWhitespace || json[index] == ":" { index = json.index(after: index) }
+        guard index < json.endIndex, json[index] == "\"" else { return nil }
+        index = json.index(after: index)
+        var result = "", escaped = false, closed = false
+        while index < json.endIndex {
+            let character = json[index]
+            index = json.index(after: index)
+            if escaped {
+                switch character {
+                case "n": result.append("\n")
+                case "r": result.append("\r")
+                case "t": result.append("\t")
+                case "\"", "\\", "/": result.append(character)
+                default: result.append(character)
+                }
+                escaped = false
+            } else if character == "\\" { escaped = true }
+            else if character == "\"" { closed = true; break }
+            else { result.append(character) }
+        }
+        return requireClosingQuote && !closed ? nil : result
+    }
+
+    private static func lines(in content: String) -> [String] {
+        guard !content.isEmpty else { return [] }
+        var lines = content.components(separatedBy: "\n")
+        if content.hasSuffix("\n") { lines.removeLast() }
+        return lines
     }
 
     static func run(_ call: PendingToolCall, workspace: String? = nil) throws -> String {
@@ -116,6 +204,47 @@ enum FileTools {
         default:
             throw AgentError.message("지원하지 않는 도구입니다: \(call.name)")
         }
+    }
+
+    static func runAsync(_ call: PendingToolCall, workspace: String? = nil) async throws -> String {
+        guard call.name == "web_search" else { return try run(call, workspace: workspace) }
+        let arguments = decodedArguments(call.arguments)
+        let query = try string("query", in: arguments)
+        let limit = min(max(Int(arguments["limit"] ?? "8") ?? 8, 1), 10)
+        var components = URLComponents(string: "https://html.duckduckgo.com/html/")!
+        components.queryItems = [URLQueryItem(name: "q", value: query)]
+        var request = URLRequest(url: components.url!)
+        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X) Opium/1.0", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw AgentError.message("웹 검색에 실패했습니다.") }
+        guard data.count <= 2_000_000 else { throw AgentError.message("검색 결과가 너무 큽니다.") }
+        let results = searchResults(from: String(decoding: data, as: UTF8.self), limit: limit)
+        guard !results.isEmpty else { throw AgentError.message("웹 검색 결과를 찾지 못했습니다.") }
+        return results.enumerated().map { "\($0.offset + 1). \($0.element.title)\n\($0.element.url)" }.joined(separator: "\n\n")
+    }
+
+    static func searchResults(from html: String, limit: Int) -> [(title: String, url: String)] {
+        let pattern = #"<a rel="nofollow" class="result__a" href="([^"]+)">(.+?)</a>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.dotMatchesLineSeparators]) else { return [] }
+        let range = NSRange(html.startIndex..., in: html)
+        return regex.matches(in: html, range: range).prefix(limit).compactMap { match in
+            guard let hrefRange = Range(match.range(at: 1), in: html),
+                  let titleRange = Range(match.range(at: 2), in: html) else { return nil }
+            let href = decodeHTML(String(html[hrefRange]))
+            let redirect = href.hasPrefix("//") ? "https:" + href : href
+            let url = URLComponents(string: redirect)?.queryItems?.first(where: { $0.name == "uddg" })?.value ?? redirect
+            let title = decodeHTML(String(html[titleRange])).replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            return (title, url)
+        }
+    }
+
+    private static func decodeHTML(_ value: String) -> String {
+        value.replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#x27;", with: "'")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
     }
 
     static func paths(in call: PendingToolCall, workspace: String? = nil) -> [String] {

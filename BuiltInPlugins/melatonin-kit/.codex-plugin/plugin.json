@@ -1,0 +1,13 @@
+{
+  "name": "melatonin-kit",
+  "version": "0.1.0",
+  "description": "Mac의 부하와 발열을 낮춰 천천히 실행하는 저전력 프로필",
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Melatonin Kit",
+    "shortDescription": "낮은 부하로 차분하게 실행하는 저전력 모드",
+    "developerName": "Opium",
+    "category": "Performance",
+    "brandColor": "#65598F"
+  }
+}

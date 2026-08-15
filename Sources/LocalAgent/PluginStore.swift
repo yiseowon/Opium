@@ -28,6 +28,7 @@ struct InstalledPlugin: Identifiable, Hashable {
     let skillURLs: [URL]
     let hasMCP: Bool
     let hasHooks: Bool
+    let isBuiltIn: Bool
     var isEnabled: Bool
 
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id && lhs.isEnabled == rhs.isEnabled }
@@ -52,10 +53,20 @@ final class PluginStore {
 
     func discover() {
         let enabled = Set(UserDefaults.standard.stringArray(forKey: enabledKey) ?? [])
-        let roots = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
+        var roots = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil,
                                                                   options: [.skipsHiddenFiles])) ?? []
-        plugins = roots.compactMap { try? Self.loadPlugin(at: $0, enabled: enabled.contains($0.lastPathComponent)) }
-            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+        roots.append(contentsOf: Self.builtInPluginURLs)
+        plugins = roots.compactMap {
+            let isBuiltIn = Self.builtInPluginURLs.contains($0)
+            let isRequired = $0.lastPathComponent == "adrenaline-kit"
+            return try? Self.loadPlugin(at: $0, enabled: isRequired || enabled.contains($0.lastPathComponent), isBuiltIn: isBuiltIn)
+        }
+            .sorted {
+                let order = ["adrenaline-kit": 0, "caffeine-kit": 1, "melatonin-kit": 2]
+                let lhs = order[$0.manifest.name] ?? ($0.isBuiltIn ? 3 : 10)
+                let rhs = order[$1.manifest.name] ?? ($1.isBuiltIn ? 3 : 10)
+                return lhs == rhs ? $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending : lhs < rhs
+            }
     }
 
     func chooseAndInstall() {
@@ -83,7 +94,41 @@ final class PluginStore {
         discover()
     }
 
+    func installFromCatalog(name: String, displayName: String, summary: String, documentationURL: String) {
+        let destination = directory.appending(path: name, directoryHint: .isDirectory)
+        guard !FileManager.default.fileExists(atPath: destination.path) else { return }
+        do {
+            let manifestDirectory = destination.appending(path: ".codex-plugin", directoryHint: .isDirectory)
+            let skillDirectory = destination.appending(path: "skills/connector", directoryHint: .isDirectory)
+            try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: skillDirectory, withIntermediateDirectories: true)
+            let manifest = PluginManifest(name: name, version: "1.0.0", description: summary,
+                                          skills: "./skills/", mcpServers: nil, hooks: nil,
+                                          interface: .init(displayName: displayName, shortDescription: summary,
+                                                           developerName: displayName, category: "connector",
+                                                           brandColor: "#7A61F5", logo: nil))
+            try JSONEncoder().encode(manifest).write(to: manifestDirectory.appending(path: "plugin.json"), options: .atomic)
+            let skill = """
+            ---
+            name: \(name)-connector
+            description: \(summary)
+            ---
+            This connector is installed but requires an authenticated MCP connection before use.
+            Setup documentation: \(documentationURL)
+            Never claim access until the connection is configured and verified.
+            """
+            try Data(skill.utf8).write(to: skillDirectory.appending(path: "SKILL.md"), options: .atomic)
+            discover()
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func isInstalled(_ name: String) -> Bool { plugins.contains { $0.manifest.name == name } }
+
     func setEnabled(_ enabled: Bool, for plugin: InstalledPlugin) {
+        guard plugin.manifest.name != "adrenaline-kit" else { return }
         var names = Set(UserDefaults.standard.stringArray(forKey: enabledKey) ?? [])
         if enabled { names.insert(plugin.manifest.name) } else { names.remove(plugin.manifest.name) }
         UserDefaults.standard.set(Array(names), forKey: enabledKey)
@@ -91,12 +136,15 @@ final class PluginStore {
     }
 
     func uninstall(_ plugin: InstalledPlugin) {
+        guard !plugin.isBuiltIn else { return }
         do {
             setEnabled(false, for: plugin)
             _ = try FileManager.default.trashItem(at: plugin.rootURL, resultingItemURL: nil)
             discover()
         } catch { errorMessage = error.localizedDescription }
     }
+
+    func isEnabled(_ name: String) -> Bool { plugins.contains { $0.manifest.name == name && $0.isEnabled } }
 
     var enabledInstructions: String {
         var remaining = 60_000
@@ -112,7 +160,7 @@ final class PluginStore {
         }.joined(separator: "\n\n")
     }
 
-    static func loadPlugin(at root: URL, enabled: Bool) throws -> InstalledPlugin {
+    static func loadPlugin(at root: URL, enabled: Bool, isBuiltIn: Bool = false) throws -> InstalledPlugin {
         let manifestURL = root.appending(path: ".codex-plugin/plugin.json")
         let data = try Data(contentsOf: manifestURL)
         let manifest = try JSONDecoder().decode(PluginManifest.self, from: data)
@@ -125,7 +173,19 @@ final class PluginStore {
         return InstalledPlugin(manifest: manifest, rootURL: root, skillURLs: skillURLs,
                                hasMCP: FileManager.default.fileExists(atPath: mcpURL.path),
                                hasHooks: FileManager.default.fileExists(atPath: hooksURL.path),
+                               isBuiltIn: isBuiltIn,
                                isEnabled: enabled)
+    }
+
+    private static var builtInPluginURLs: [URL] {
+        let roots = [
+            Bundle.main.resourceURL?.appending(path: "BuiltInPlugins"),
+            URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appending(path: "BuiltInPlugins")
+        ].compactMap { $0 }
+        guard let root = roots.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else { return [] }
+        return ((try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil,
+                                                               options: [.skipsHiddenFiles])) ?? [])
+            .filter { FileManager.default.fileExists(atPath: $0.appending(path: ".codex-plugin/plugin.json").path) }
     }
 
     private static func componentURL(in root: URL, path: String?, defaultPath: String) throws -> URL {
