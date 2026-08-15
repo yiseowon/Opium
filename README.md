@@ -7,7 +7,7 @@
     <img alt="Apple Silicon" src="https://img.shields.io/badge/Apple%20Silicon-권장-7A61F5?style=flat-square">
     <img alt="Status" src="https://img.shields.io/badge/status-preview-7A61F5?style=flat-square">
   </p>
-  <p><a href="https://github.com/yiseowon/Opium/releases/latest/download/Opium-macOS-arm64.zip"><strong>Apple Silicon용 Opium 다운로드</strong></a></p>
+  <p><a href="https://github.com/yiseowon/Opium/releases/download/v0.2.0-preview/Opium-macOS-arm64.zip"><strong>Apple Silicon용 Opium 다운로드</strong></a></p>
 </div>
 
 Opium은 Ollama·LM Studio와 같은 로컬 LLM 애플리케이션 범주에 속하지만, 모델 실행보다 **에이전트 작업**에 초점을 맞춥니다. GGUF 모델이 파일을 읽고 수정하고, 명령을 실행하고, 웹과 메일 도구를 호출하는 과정을 macOS 인터페이스에서 관리합니다.
@@ -135,7 +135,7 @@ my-plugin/
 
 ### 1. Opium 설치
 
-1. [최신 릴리스](https://github.com/yiseowon/Opium/releases/latest)에서 `Opium-macOS-arm64.zip`을 받습니다.
+1. [Opium 0.2.0 Preview](https://github.com/yiseowon/Opium/releases/tag/v0.2.0-preview)에서 `Opium-macOS-arm64.zip`을 받습니다.
 2. 압축을 풀고 `Opium.app`을 Applications 폴더로 이동합니다.
 3. 최초 실행 시 Finder에서 앱을 Control-클릭한 뒤 **열기**를 선택합니다.
 
