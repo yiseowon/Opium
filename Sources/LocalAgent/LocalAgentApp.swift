@@ -60,6 +60,7 @@ struct ContentView: View {
     @State private var showingPermissions = false
     @State private var showingPlugins = false
     @State private var showingModelDownloads = false
+    @State private var composerHeight: CGFloat = 22
     @State private var sidebarVisible = true
     @State private var inspectorVisible = true
     @State private var renamingThread: ChatThread?
@@ -173,7 +174,7 @@ struct ContentView: View {
             .listStyle(.sidebar).scrollContentBackground(.hidden)
             Button { showingPlugins = true } label: {
                 HStack {
-                    Image(systemName: "puzzlepiece.extension")
+                    Image(systemName: "puzzlepiece.extension").frame(width: 18, alignment: .center)
                     Text("플러그인")
                     Spacer()
                     Text("\(model.plugins.plugins.filter(\.isEnabled).count)")
@@ -182,7 +183,7 @@ struct ContentView: View {
             }.buttonStyle(OpiumHoverButtonStyle())
             Button { showingModelDownloads = true } label: {
                 HStack {
-                    Image(systemName: "arrow.down.circle")
+                    Image(systemName: "arrow.down.circle").frame(width: 18, alignment: .center)
                     Text("모델 관리")
                     Spacer()
                     Text("\(model.llama.models.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
@@ -191,11 +192,11 @@ struct ContentView: View {
             Divider().opacity(0.5)
             Button { showingPermissions = true } label: {
                 HStack {
-                    Image(systemName: "slider.horizontal.3")
+                    Image(systemName: "slider.horizontal.3").frame(width: 18, alignment: .center)
                     Text("권한 및 설정")
                     Spacer()
                     Text(model.permissions.policy.title).font(.caption).foregroundStyle(.secondary)
-                }.contentShape(Rectangle()).padding(14)
+                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
             }.buttonStyle(OpiumHoverButtonStyle())
         }.background(Color(nsColor: .windowBackgroundColor).opacity(0.68))
     }
@@ -337,10 +338,10 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(Color.opiumPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ComposerTextView(text: $model.input) {
+            ComposerTextView(text: $model.input, height: $composerHeight, minHeight: 22, maxHeight: 220) {
                 Task { await model.send() }
             }
-            .frame(minHeight: 22, maxHeight: 220, alignment: .topLeading)
+            .frame(height: composerHeight, alignment: .topLeading)
             .overlay(alignment: .topLeading) {
                 if model.input.isEmpty {
                     Text("무엇이든 요청하세요").foregroundStyle(.secondary).font(AppFont.body)
@@ -512,6 +513,9 @@ private final class ReturnAwareTextView: NSTextView {
 
 private struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
+    @Binding var height: CGFloat
+    let minHeight: CGFloat
+    let maxHeight: CGFloat
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -536,6 +540,7 @@ private struct ComposerTextView: NSViewRepresentable {
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         context.coordinator.textView = textView
+        DispatchQueue.main.async { context.coordinator.recalculateHeight() }
         return scrollView
     }
 
@@ -543,9 +548,17 @@ private struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = context.coordinator.textView else { return }
         textView.onReturn = { context.coordinator.parent.onSubmit() }
-        if textView.string != text { textView.string = text }
+        if textView.string != text {
+            textView.string = text
+            context.coordinator.recalculateHeight()
+        }
     }
 
+    /// NSScrollView reports no intrinsic content size, so a bare min/maxHeight frame
+    /// just expands it to the maximum every time — this measures the actual text
+    /// height and drives a fixed frame from that instead, so the box starts small
+    /// and only grows with what's actually typed.
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
         weak var textView: ReturnAwareTextView?
@@ -555,6 +568,15 @@ private struct ComposerTextView: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            recalculateHeight()
+        }
+
+        func recalculateHeight() {
+            guard let textView, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
+            layoutManager.ensureLayout(for: container)
+            let used = layoutManager.usedRect(for: container).height + textView.textContainerInset.height * 2
+            let clamped = min(max(used, parent.minHeight), parent.maxHeight)
+            if abs(clamped - parent.height) > 0.5 { parent.height = clamped }
         }
     }
 }
