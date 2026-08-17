@@ -14,8 +14,11 @@ enum AppFont {
     static let heading = Font.system(size: 16, weight: .semibold)
     static let body = Font.system(size: 15)
     static let bodyEmphasis = Font.system(size: 15, weight: .medium)
+    static let secondary = Font.system(size: 14)
+    static let secondaryEmphasis = Font.system(size: 14, weight: .medium)
     static let caption = Font.system(size: 13)
     static let mono = Font.system(size: 13, design: .monospaced)
+    static let micro = Font.system(size: 11, weight: .semibold)
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -143,7 +146,7 @@ struct ContentView: View {
                     .buttonStyle(OpiumHoverButtonStyle())
                 }
             }
-            .font(.system(size: 14.5, weight: .medium))
+            .font(AppFont.bodyEmphasis)
             .padding(5).background(Color.opiumPurpleMuted, in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 10)
             List(selection: $model.store.selectedID) {
                 Section("최근 작업") {
@@ -237,9 +240,9 @@ struct ContentView: View {
                             HStack(spacing: 10) {
                                 OpiumLoader()
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("모델 로드 중").font(.system(size: 15, weight: .medium))
+                                    Text("모델 로드 중").font(AppFont.bodyEmphasis)
                                     Text(model.llama.selectedModel?.displayName ?? "로컬 모델")
-                                        .font(.system(size: 13)).foregroundStyle(.secondary)
+                                        .font(AppFont.caption).foregroundStyle(.secondary)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -252,9 +255,9 @@ struct ContentView: View {
                                     Image(systemName: activity.symbol).foregroundStyle(.secondary)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("\(activity.title)  ·  \(context.date.timeIntervalSince(activity.date), format: .number.precision(.fractionLength(1)))초")
-                                            .font(.system(size: 14, weight: .medium)).foregroundStyle(.secondary)
+                                            .font(AppFont.secondaryEmphasis).foregroundStyle(.secondary)
                                         if let detail = activity.detail, !detail.isEmpty {
-                                            Text(detail).font(.system(size: 13, design: .monospaced))
+                                            Text(detail).font(AppFont.mono)
                                                 .foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
                                         }
                                     }
@@ -265,7 +268,7 @@ struct ContentView: View {
                         if model.llama.isGenerating, model.inlineActivity == nil {
                             HStack(spacing: 8) {
                                 OpiumLoader()
-                                Text("응답 작성 중").font(.system(size: 13, design: .monospaced)).foregroundStyle(.secondary)
+                                Text("응답 작성 중").font(AppFont.mono).foregroundStyle(.secondary)
                                 if !model.activeChangeStats.isEmpty { ChangeCountView(stats: model.activeChangeStats) }
                             }
                         }
@@ -643,21 +646,21 @@ private struct ActivityInspector: View {
                                     HStack(spacing: 6) {
                                         Text(activity.title).font(AppFont.bodyEmphasis)
                                         if let level = activity.securityLevel {
-                                            Text(level.title).font(.system(size: 11, weight: .semibold))
+                                            Text(level.title).font(AppFont.micro)
                                                 .foregroundStyle(securityColor(level))
                                                 .padding(.horizontal, 5).padding(.vertical, 2)
                                                 .background(securityColor(level).opacity(0.12), in: Capsule())
                                         }
                                     }
                                     if let detail = activity.detail, !detail.isEmpty {
-                                        Text(detail).font(.system(size: 14)).foregroundStyle(.secondary)
+                                        Text(detail).font(AppFont.secondary).foregroundStyle(.secondary)
                                             .lineLimit(2).truncationMode(.middle)
                                     }
                                     if let outcome = activity.outcome, !outcome.isEmpty {
-                                        Text(outcome).font(.system(size: 13)).foregroundStyle(.secondary)
+                                        Text(outcome).font(AppFont.caption).foregroundStyle(.secondary)
                                             .lineLimit(2).truncationMode(.middle)
                                     }
-                                    Text(activity.date, style: .time).font(.system(size: 13)).foregroundStyle(.tertiary)
+                                    Text(activity.date, style: .time).font(AppFont.caption).foregroundStyle(.tertiary)
                                 }
                                 Spacer(minLength: 0)
                                 if activity.isActive { Circle().fill(.green).frame(width: 6, height: 6).padding(.top, 5) }
@@ -694,7 +697,7 @@ private struct ResourcePanel: View {
                 Text("메모리").font(.headline)
                 Spacer()
                 Text("\(bytes(totalUsage)) / \(bytes(snapshot.physicalBytes))")
-                    .font(.system(size: 14, design: .monospaced)).foregroundStyle(.secondary)
+                    .font(AppFont.secondary).monospacedDigit().foregroundStyle(.secondary)
             }
             MemoryGraph(values: snapshot.history)
                 .frame(height: 42)
@@ -706,7 +709,7 @@ private struct ResourcePanel: View {
                 Label("온도 상태", systemImage: "thermometer.medium").foregroundStyle(.secondary)
                 Spacer()
                 Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
-            }.font(.system(size: 14))
+            }.font(AppFont.secondary)
             VStack(spacing: 7) {
                 resourceRow("모델 프로세스", snapshot.modelBytes, .opiumPurple)
                 resourceRow("Opium", snapshot.appBytes, Color.opiumPurple.opacity(0.62))
@@ -728,11 +731,11 @@ private struct ResourcePanel: View {
                     Text("생성 속도").foregroundStyle(.secondary)
                     Spacer(); Text(String(format: "%.1f tok/s", model.liveMetrics.tokensPerSecond)).monospacedDigit()
                 }
-            }.font(.system(size: 14))
+            }.font(AppFont.secondary)
             if model.llama.isRunning {
                 Button { model.llama.stop() } label: {
                     Label("모델 언로드", systemImage: "power")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(AppFont.secondaryEmphasis)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent).tint(.orange).controlSize(.large)
@@ -750,7 +753,7 @@ private struct ResourcePanel: View {
                 Text(value.map { "\(Int($0 * 100))%" } ?? "—").monospacedDigit()
             }
             ProgressView(value: value ?? 0).tint(color)
-        }.font(.system(size: 14)).frame(maxWidth: .infinity)
+        }.font(AppFont.secondary).frame(maxWidth: .infinity)
     }
 
     private func resourceRow(_ title: String, _ value: UInt64, _ color: Color) -> some View {
@@ -881,7 +884,7 @@ private struct MarkdownMessageView: View {
                 }
             }
         }
-        .font(.system(size: 15.5)).lineSpacing(5).textSelection(.enabled)
+        .font(AppFont.body).lineSpacing(5).textSelection(.enabled)
         .onAppear { blocks = MarkdownBlock.parse(markdown) }
         .onChange(of: markdown) { _, newValue in blocks = MarkdownBlock.parse(newValue) }
     }
@@ -998,7 +1001,7 @@ private struct MarkdownTableView: View {
                 if rowIndex < rows.count - 1 { Divider().gridCellUnsizedAxes(.horizontal) }
             }
         }
-        .font(.system(size: 13.5))
+        .font(AppFont.caption)
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 11))
         .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.08)))
@@ -1032,7 +1035,7 @@ private struct CodeBlockView: View {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .background(.secondary.opacity(0.08))
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(code).font(.system(size: 14, design: .monospaced)).lineSpacing(3)
+                Text(code).font(AppFont.secondary).monospaced().lineSpacing(3)
                     .textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -1069,7 +1072,7 @@ private struct ToolMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             DisclosureGroup {
-                Text(message.content).font(.system(size: 13, design: .monospaced)).textSelection(.enabled).padding(.top, 8)
+                Text(message.content).font(AppFont.mono).textSelection(.enabled).padding(.top, 8)
             } label: {
                 HStack(spacing: 8) {
                     Label(toolTitle + " 완료", systemImage: "checkmark.circle").font(.caption.weight(.medium))
@@ -1226,30 +1229,52 @@ private struct ModelDownloadView: View {
     @Environment(\.dismiss) private var dismiss
     private let device = DeviceCapability.current
 
+    private enum Tab: String, CaseIterable, Identifiable { case featured = "추천", search = "검색"; var id: Self { self } }
+    @State private var tab: Tab = .featured
+
+    @State private var query = ""
+    @State private var searchResults: [HFModelSummary] = []
+    @State private var isSearching = false
+    @State private var searchError: String?
+    @State private var expandedRepo: String?
+    @State private var filesByRepo: [String: [HFFile]] = [:]
+    @State private var filesLoading = false
+    @State private var searchTask: Task<Void, Never>?
+
     var body: some View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("모델 받기").font(.title2.weight(.semibold))
+                    Text("모델 관리").font(.title2.weight(.semibold))
                     Text("\(device.chipName) · 메모리 \(device.memoryGB) GB").foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
             }.padding(24)
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 12)
             Divider()
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    ForEach(ModelCatalog.all) { item in
-                        modelRow(item)
-                    }
-                }.padding(20)
+            switch tab {
+            case .featured: featuredList
+            case .search: searchTab
             }
-            .alert("다운로드 오류", isPresented: Binding(get: { model.downloader.errorMessage != nil },
-                set: { if !$0 { model.downloader.errorMessage = nil } })) {
-                Button("확인", role: .cancel) {}
-            } message: { Text(model.downloader.errorMessage ?? "") }
         }
-        .frame(width: 560, height: 560)
+        .frame(width: 600, height: 620)
+        .alert("다운로드 오류", isPresented: Binding(get: { model.downloader.errorMessage != nil },
+            set: { if !$0 { model.downloader.errorMessage = nil } })) {
+            Button("확인", role: .cancel) {}
+        } message: { Text(model.downloader.errorMessage ?? "") }
+    }
+
+    // MARK: - Featured (curated catalog)
+
+    private var featuredList: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(ModelCatalog.all) { item in modelRow(item) }
+            }.padding(20)
+        }
     }
 
     private var recommendedID: String? { ModelCatalog.recommended(forMemoryGB: device.memoryGB)?.id }
@@ -1298,6 +1323,122 @@ private struct ModelDownloadView: View {
             }
         }
     }
+
+    // MARK: - Live Hugging Face search
+
+    private var searchTab: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("모델 이름으로 검색 (예: qwen3, llama, gemma)", text: $query)
+                    .textFieldStyle(.plain)
+                    .onSubmit { runSearch() }
+                if isSearching { ProgressView().controlSize(.small) }
+            }
+            .padding(10).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+            .padding([.horizontal, .top], 20).padding(.bottom, 12)
+            .onChange(of: query) { _, _ in debounceSearch() }
+
+            if let searchError {
+                Text(searchError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 20)
+            }
+
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(searchResults) { result in searchResultRow(result) }
+                }.padding(.horizontal, 20).padding(.bottom, 20)
+            }
+        }
+    }
+
+    private func debounceSearch() {
+        searchTask?.cancel()
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else {
+            searchResults = []
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await performSearch()
+        }
+    }
+
+    private func runSearch() {
+        searchTask?.cancel()
+        Task { await performSearch() }
+    }
+
+    private func performSearch() async {
+        isSearching = true
+        searchError = nil
+        do {
+            searchResults = try await HuggingFaceSearch.searchModels(query: query)
+        } catch {
+            searchError = error.localizedDescription
+        }
+        isSearching = false
+    }
+
+    private func searchResultRow(_ result: HFModelSummary) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    expandedRepo = expandedRepo == result.id ? nil : result.id
+                }
+                guard filesByRepo[result.id] == nil else { return }
+                Task {
+                    filesLoading = true
+                    defer { filesLoading = false }
+                    filesByRepo[result.id] = (try? await HuggingFaceSearch.ggufFiles(repo: result.id)) ?? []
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.id).font(.system(size: 14, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                        if let downloads = result.downloads {
+                            Text("다운로드 \(downloads.formatted())").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: expandedRepo == result.id ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(.secondary).font(.caption)
+                }
+            }.buttonStyle(.plain)
+
+            if expandedRepo == result.id {
+                if filesLoading && filesByRepo[result.id] == nil {
+                    ProgressView().controlSize(.small).frame(maxWidth: .infinity)
+                } else {
+                    ForEach(filesByRepo[result.id] ?? []) { file in
+                        searchFileRow(repo: result.id, file: file)
+                    }
+                }
+            }
+        }
+        .padding(12).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.primary.opacity(0.07)))
+    }
+
+    private func searchFileRow(repo: String, file: HFFile) -> some View {
+        let catalogItem = HuggingFaceSearch.catalogModel(repo: repo, file: file)
+        let installed = model.downloader.isInstalled(catalogItem)
+        let progress = model.downloader.progress[catalogItem.id]
+
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.path).font(.caption).lineLimit(1).truncationMode(.middle)
+                Text("\(String(format: "%.1f", file.sizeGB)) GB · 최소 메모리 \(file.estimatedMinMemoryGB) GB")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let progress {
+                ProgressView(value: progress).frame(width: 60).tint(.opiumPurple)
+            }
+            actionButton(catalogItem, installed: installed, isDownloading: progress != nil)
+        }
+        .padding(.leading, 12).padding(.vertical, 4)
+    }
 }
 
 private struct PluginDirectoryView: View {
@@ -1345,7 +1486,7 @@ private struct PluginDirectoryView: View {
                                                     .background(Color.opiumPurple.opacity(0.12), in: Capsule())
                                             }
                                         }
-                                        Text(plugin.summary).font(.system(size: 14)).foregroundStyle(.secondary).lineLimit(2)
+                                        Text(plugin.summary).font(AppFont.secondary).foregroundStyle(.secondary).lineLimit(2)
                                         HStack(spacing: 6) {
                                             capability("Skill \(plugin.skillURLs.count)", active: !plugin.skillURLs.isEmpty)
                                             capability(plugin.manifest.name == "adrenaline-kit" ? "기본 도구 11" : (plugin.isBuiltIn ? "효율 프로필" : "MCP"),
@@ -1392,8 +1533,8 @@ private struct PluginDirectoryView: View {
                                         }
                                         .frame(width: 22, height: 22)
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(item.name).font(.system(size: 14, weight: .semibold))
-                                            Text(item.detail).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                                            Text(item.name).font(AppFont.secondaryEmphasis)
+                                            Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                         Spacer()
                                         if store.isInstalled(item.id) {
