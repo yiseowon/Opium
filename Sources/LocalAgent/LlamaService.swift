@@ -23,6 +23,7 @@ final class LlamaService {
     private var process: Process?
     private var streamTask: Task<Void, Never>?
     private var healthMonitorTask: Task<Void, Never>?
+    private var mmprojCandidates: [URL] = []
     private var generation = 0
     private var restartAttempts = 0
     private let maxRestartAttempts = 3
@@ -49,10 +50,10 @@ final class LlamaService {
         let urls = directories.flatMap {
             (try? FileManager.default.contentsOfDirectory(at: $0, includingPropertiesForKeys: nil)) ?? []
         }
-        models = Array(Set(urls)).map(LocalModel.init).filter {
-            $0.url.pathExtension.lowercased() == "gguf"
-                && !$0.isAuxiliary
-                && !FileManager.default.fileExists(atPath: $0.url.path + ".aria2")
+        let ggufURLs = Array(Set(urls)).filter { $0.pathExtension.lowercased() == "gguf" }
+        mmprojCandidates = ggufURLs.filter { $0.lastPathComponent.lowercased().hasPrefix("mmproj-") }
+        models = ggufURLs.map(LocalModel.init).filter {
+            !$0.isAuxiliary && !FileManager.default.fileExists(atPath: $0.url.path + ".aria2")
         }.sorted { $0.name < $1.name }
         let savedPath = UserDefaults.standard.string(forKey: "selectedModelPath")
         if selectedModel == nil || !models.contains(selectedModel!) {
@@ -60,6 +61,19 @@ final class LlamaService {
                 ?? models.first(where: \.isQwen38)
                 ?? models.first
         }
+    }
+
+    /// Prefers a catalog-declared pairing, falls back to an mmproj file sitting next to
+    /// the model, then to the only mmproj file discovered anywhere if there's just one —
+    /// manually placed models (like the app's own default validation model) don't go
+    /// through the catalog and won't necessarily share a folder with their mmproj file.
+    func mmprojPath(for model: LocalModel) -> String? {
+        if let catalogPath = model.catalogMmprojPath { return catalogPath }
+        let modelDirectory = model.url.deletingLastPathComponent()
+        if let sameDirectory = mmprojCandidates.first(where: { $0.deletingLastPathComponent() == modelDirectory }) {
+            return sameDirectory.path
+        }
+        return mmprojCandidates.count == 1 ? mmprojCandidates[0].path : nil
     }
 
     func start() async throws {
@@ -84,7 +98,7 @@ final class LlamaService {
             "--alias", model.name
         ]
         if lowPowerMode { process.arguments?.append(contentsOf: ["--threads", "4", "--threads-batch", "4"]) }
-        if let mmprojPath = model.mmprojPath { process.arguments?.append(contentsOf: ["--mmproj", mmprojPath]) }
+        if let mmprojPath = mmprojPath(for: model) { process.arguments?.append(contentsOf: ["--mmproj", mmprojPath]) }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] proc in
@@ -178,7 +192,7 @@ final class LlamaService {
 
     func stream(messages: [ChatMessage], workspacePath: String,
                 pluginInstructions: String = "", computerUseEnabled: Bool = false) -> AsyncThrowingStream<ModelEvent, Error> {
-        let visionCapable = selectedModel?.isVisionCapable ?? false
+        let visionCapable = selectedModel.map { mmprojPath(for: $0) != nil } ?? false
         let url = baseURL.appending(path: "v1/chat/completions")
         let modelName = selectedModel?.name ?? "local"
         let modelIdentity = selectedModel?.identity ?? "the selected local model"
