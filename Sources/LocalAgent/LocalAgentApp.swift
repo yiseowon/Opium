@@ -56,6 +56,7 @@ struct ContentView: View {
     @Bindable var model: AgentViewModel
     @State private var showingPermissions = false
     @State private var showingPlugins = false
+    @State private var showingModelDownloads = false
     @State private var sidebarVisible = true
     @State private var inspectorVisible = true
     @State private var renamingThread: ChatThread?
@@ -89,6 +90,7 @@ struct ContentView: View {
                                    modelName: model.llama.selectedModel?.name ?? "모델 없음")
         }
         .sheet(isPresented: $showingPlugins) { PluginDirectoryView(model: model) }
+        .sheet(isPresented: $showingModelDownloads) { ModelDownloadView(model: model) }
         .sheet(item: $newWorkKind) { kind in NewWorkView(kind: kind, store: model.store) }
         .alert("오류", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("확인", role: .cancel) {}
@@ -348,6 +350,7 @@ struct ContentView: View {
                             }
                         }
                         Divider(); Button("모델 다시 찾기", action: model.llama.discoverModels)
+                        Button("모델 받기…") { showingModelDownloads = true }
                     }
                     Menu("추론 강도") {
                         ForEach(ReasoningEffort.allCases) { effort in
@@ -710,6 +713,13 @@ private struct ResourcePanel: View {
                 Spacer()
                 Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
             }.font(.system(size: 14))
+            if let recommended = ModelCatalog.recommended(forMemoryGB: DeviceCapability.current.memoryGB) {
+                HStack {
+                    Label("이 기기 추천 모델", systemImage: "sparkles").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(recommended.displayName).foregroundStyle(Color.opiumPurple)
+                }.font(.system(size: 14))
+            }
             VStack(spacing: 7) {
                 resourceRow("모델 프로세스", snapshot.modelBytes, .opiumPurple)
                 resourceRow("Opium", snapshot.appBytes, Color.opiumPurple.opacity(0.62))
@@ -1173,6 +1183,85 @@ private struct PermissionSettingsView: View {
             Text(value.formatted()).font(.title3.monospacedDigit().weight(.semibold))
         }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
             .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+private struct ModelDownloadView: View {
+    @Bindable var model: AgentViewModel
+    @Environment(\.dismiss) private var dismiss
+    private let device = DeviceCapability.current
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("모델 받기").font(.title2.weight(.semibold))
+                    Text("\(device.chipName) · 메모리 \(device.memoryGB) GB").foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
+            }.padding(24)
+            Divider()
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(ModelCatalog.all) { item in
+                        modelRow(item)
+                    }
+                }.padding(20)
+            }
+            .alert("다운로드 오류", isPresented: Binding(get: { model.downloader.errorMessage != nil },
+                set: { if !$0 { model.downloader.errorMessage = nil } })) {
+                Button("확인", role: .cancel) {}
+            } message: { Text(model.downloader.errorMessage ?? "") }
+        }
+        .frame(width: 560, height: 560)
+    }
+
+    private var recommendedID: String? { ModelCatalog.recommended(forMemoryGB: device.memoryGB)?.id }
+
+    private func modelRow(_ item: CatalogModel) -> some View {
+        let installed = model.downloader.isInstalled(item)
+        let progress = model.downloader.progress[item.id]
+        let fitsDevice = item.minMemoryGB <= device.memoryGB
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 7) {
+                        Text(item.displayName).font(.headline)
+                        if item.id == recommendedID {
+                            Text("추천").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
+                                .padding(.horizontal, 6).padding(.vertical, 3)
+                                .background(Color.opiumPurple.opacity(0.12), in: Capsule())
+                        }
+                    }
+                    Text("\(item.quant) · \(String(format: "%.1f", item.sizeGB)) GB · 최소 메모리 \(item.minMemoryGB) GB")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !fitsDevice {
+                        Text("이 기기 메모리로는 느리거나 불안정할 수 있어요").font(.caption).foregroundStyle(.orange)
+                    }
+                }
+                Spacer()
+                actionButton(item, installed: installed, isDownloading: progress != nil)
+            }
+            if let progress {
+                ProgressView(value: progress).tint(.opiumPurple)
+            }
+        }
+        .padding(14).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.07)))
+    }
+
+    private func actionButton(_ item: CatalogModel, installed: Bool, isDownloading: Bool) -> some View {
+        Group {
+            if installed {
+                Label("설치됨", systemImage: "checkmark.circle.fill").font(.caption.weight(.medium)).foregroundStyle(.green)
+            } else if isDownloading {
+                Button("취소") { model.downloader.cancel(item) }.buttonStyle(.bordered).controlSize(.small)
+            } else {
+                Button("받기") { model.downloader.start(item) }.buttonStyle(.borderedProminent).controlSize(.small).tint(.opiumPurple)
+            }
+        }
     }
 }
 

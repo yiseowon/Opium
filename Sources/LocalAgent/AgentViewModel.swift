@@ -19,6 +19,7 @@ final class AgentViewModel {
     var inlineActivity: AgentActivity?
     var resources = ResourceMonitor()
     var plugins = PluginStore()
+    var downloader = ModelDownloader()
     private var activeChanges: [String] = []
     private var completedStepMetrics = GenerationMetrics()
     private var queuedPrompt: String?
@@ -32,6 +33,7 @@ final class AgentViewModel {
         llama.lowPowerMode = plugins.isEnabled("melatonin-kit")
         resources.start { [weak llama] in llama?.processID }
         llama.onFatalError = { [weak self] message in self?.errorMessage = message }
+        downloader.onModelInstalled = { [weak self] in self?.llama.discoverModels() }
     }
 
     func send() async {
