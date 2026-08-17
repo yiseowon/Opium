@@ -1209,22 +1209,45 @@ private struct PermissionSettingsView: View {
                 }
             }.toggleStyle(.switch)
             if store.computerUseEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    permissionRow(
-                        title: "접근성 권한", granted: ComputerUse.hasAccessibilityAccess,
-                        request: { ComputerUse.requestAccessibilityAccess() }
-                    )
-                    permissionRow(
-                        title: "화면 기록 권한", granted: ComputerUse.hasScreenRecordingAccess,
-                        request: { ComputerUse.requestScreenRecordingAccess() }
-                    )
-                    Text("화면 캡처는 비전 모델을 선택했을 때만 의미가 있습니다. 텍스트 전용 모델에서는 화면 요소 목록(list_ui_elements)만 활용됩니다.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }.padding(12).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                ComputerUsePermissionStatus()
+                Text("화면 캡처는 비전 모델을 선택했을 때만 의미가 있습니다. 텍스트 전용 모델에서는 화면 요소 목록(list_ui_elements)만 활용됩니다.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(14).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.orange.opacity(0.25)))
+    }
+
+    private func usageCard(_ title: String, _ value: Int) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value.formatted()).font(.title3.monospacedDigit().weight(.semibold))
+        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// TCC grants can change at any moment from outside the app (System Settings), and
+/// AXIsProcessTrusted/CGPreflightScreenCaptureAccess are plain synchronous checks with
+/// no change notification — so this polls instead of reading them once at render time,
+/// otherwise the row can sit on a stale "not granted" reading indefinitely.
+private struct ComputerUsePermissionStatus: View {
+    @State private var accessibilityGranted = ComputerUse.hasAccessibilityAccess
+    @State private var screenRecordingGranted = ComputerUse.hasScreenRecordingAccess
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            permissionRow(title: "접근성 권한", granted: accessibilityGranted) { ComputerUse.requestAccessibilityAccess() }
+            permissionRow(title: "화면 기록 권한", granted: screenRecordingGranted) { ComputerUse.requestScreenRecordingAccess() }
+        }
+        .padding(12).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .task {
+            while !Task.isCancelled {
+                accessibilityGranted = ComputerUse.hasAccessibilityAccess
+                screenRecordingGranted = ComputerUse.hasScreenRecordingAccess
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     private func permissionRow(title: String, granted: Bool, request: @escaping () -> Void) -> some View {
@@ -1235,14 +1258,6 @@ private struct PermissionSettingsView: View {
             Spacer()
             if !granted { Button("권한 요청", action: request).buttonStyle(.bordered).controlSize(.small) }
         }
-    }
-
-    private func usageCard(_ title: String, _ value: Int) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value.formatted()).font(.title3.monospacedDigit().weight(.semibold))
-        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
