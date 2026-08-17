@@ -177,6 +177,14 @@ struct ContentView: View {
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
             }.buttonStyle(OpiumHoverButtonStyle())
+            Button { showingModelDownloads = true } label: {
+                HStack {
+                    Image(systemName: "arrow.down.circle")
+                    Text("모델 관리")
+                    Spacer()
+                    Text("\(model.llama.models.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
+            }.buttonStyle(OpiumHoverButtonStyle())
             Divider().opacity(0.5)
             Button { showingPermissions = true } label: {
                 HStack {
@@ -326,10 +334,16 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(Color.opiumPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ComposerTextView(text: $model.input, placeholder: "무엇이든 요청하세요") {
+            ComposerTextView(text: $model.input) {
                 Task { await model.send() }
             }
-            .frame(minHeight: 76, maxHeight: 220, alignment: .topLeading)
+            .frame(minHeight: 22, maxHeight: 220, alignment: .topLeading)
+            .overlay(alignment: .topLeading) {
+                if model.input.isEmpty {
+                    Text("무엇이든 요청하세요").foregroundStyle(.secondary).font(AppFont.body)
+                        .padding(.top, 2).allowsHitTesting(false)
+                }
+            }
             HStack {
                 Menu {
                     Button("파일 첨부", systemImage: "paperclip", action: model.chooseFiles)
@@ -350,7 +364,6 @@ struct ContentView: View {
                             }
                         }
                         Divider(); Button("모델 다시 찾기", action: model.llama.discoverModels)
-                        Button("모델 받기…") { showingModelDownloads = true }
                     }
                     Menu("추론 강도") {
                         ForEach(ReasoningEffort.allCases) { effort in
@@ -496,7 +509,6 @@ private final class ReturnAwareTextView: NSTextView {
 
 private struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
-    let placeholder: String
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -517,11 +529,10 @@ private struct ComposerTextView: NSViewRepresentable {
 
         let scrollView = NSScrollView()
         scrollView.documentView = textView
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = false
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         context.coordinator.textView = textView
-        context.coordinator.placeholderField = makePlaceholder(in: scrollView)
         return scrollView
     }
 
@@ -530,34 +541,17 @@ private struct ComposerTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         textView.onReturn = { context.coordinator.parent.onSubmit() }
         if textView.string != text { textView.string = text }
-        context.coordinator.placeholderField?.isHidden = !text.isEmpty
-    }
-
-    private func makePlaceholder(in scrollView: NSScrollView) -> NSTextField {
-        let field = NSTextField(labelWithString: placeholder)
-        field.font = .systemFont(ofSize: 15)
-        field.textColor = .placeholderTextColor
-        field.isHidden = !text.isEmpty
-        field.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(field)
-        NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 5),
-            field.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 3)
-        ])
-        return field
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ComposerTextView
         weak var textView: ReturnAwareTextView?
-        weak var placeholderField: NSTextField?
 
         init(_ parent: ComposerTextView) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
-            placeholderField?.isHidden = !textView.string.isEmpty
         }
     }
 }
@@ -713,13 +707,6 @@ private struct ResourcePanel: View {
                 Spacer()
                 Text(snapshot.thermalState).foregroundStyle(snapshot.thermalState == "정상" ? Color.secondary : .orange)
             }.font(.system(size: 14))
-            if let recommended = ModelCatalog.recommended(forMemoryGB: DeviceCapability.current.memoryGB) {
-                HStack {
-                    Label("이 기기 추천 모델", systemImage: "sparkles").foregroundStyle(.secondary)
-                    Spacer()
-                    Text(recommended.displayName).foregroundStyle(Color.opiumPurple)
-                }.font(.system(size: 14))
-            }
             VStack(spacing: 7) {
                 resourceRow("모델 프로세스", snapshot.modelBytes, .opiumPurple)
                 resourceRow("Opium", snapshot.appBytes, Color.opiumPurple.opacity(0.62))
