@@ -273,9 +273,17 @@ final class AgentViewModel {
                 result = try await Task.detached { try await FileTools.runAsync(call, workspace: workspace) }.value
             }
         } catch {
+            // A dangling tool_call with no matching tool response breaks every
+            // later request in this thread (the API contract requires one), so the
+            // model still needs to see *something* back — even a failure — instead
+            // of the turn just dead-ending here.
             inlineActivity = nil
             completeToolActivity(activityID, outcome: "실패: \(error.localizedDescription)")
-            throw error
+            store.append(ChatMessage(role: .tool, content: "[\(call.name)] 실패: \(error.localizedDescription)",
+                                     reasoning: call.progress, metrics: call.metrics,
+                                     toolCallID: call.id, toolName: call.name, toolArguments: call.arguments))
+            await generate()
+            return
         }
         try? await Task.sleep(for: .milliseconds(350))
         inlineActivity = nil

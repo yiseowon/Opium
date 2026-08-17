@@ -41,11 +41,12 @@ final class PermissionStore {
         computerUseEnabled = defaults.bool(forKey: "computerUseEnabled")
     }
 
-    /// Computer-use tools always require an explicit tap, no matter the file-tool
-    /// policy — "전체 액세스" or a trusted folder never implies "allowed to click
-    /// around the screen".
+    /// Computer-use tools follow the same policy as everything else, with one
+    /// exception: "safeReads" and "trustedFolders" never auto-approve them (clicking
+    /// around the screen isn't a "safe read" or scoped to a folder the way file edits
+    /// are). "전체 액세스" means full access, including this.
     func allows(_ call: PendingToolCall, workspace: String? = nil) -> Bool {
-        guard !ComputerUse.toolNames.contains(call.name) else { return false }
+        if ComputerUse.toolNames.contains(call.name) { return policy == .fullAccess }
         switch policy {
         case .askEveryTime:
             return false
