@@ -31,6 +31,7 @@ final class AgentViewModel {
         llama.discoverModels()
         llama.lowPowerMode = plugins.isEnabled("melatonin-kit")
         resources.start { [weak llama] in llama?.processID }
+        llama.onFatalError = { [weak self] message in self?.errorMessage = message }
     }
 
     func send() async {

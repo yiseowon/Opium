@@ -22,9 +22,14 @@ final class LlamaService {
 
     private var process: Process?
     private var streamTask: Task<Void, Never>?
+    private var healthMonitorTask: Task<Void, Never>?
+    private var generation = 0
+    private var restartAttempts = 0
+    private let maxRestartAttempts = 3
     private let port = 11435
     private let apiKey = "localagent-loopback"
     var processID: Int32? { process?.isRunning == true ? process?.processIdentifier : nil }
+    var onFatalError: ((String) -> Void)?
 
     init() {
         effort = ReasoningEffort(rawValue: UserDefaults.standard.string(forKey: "reasoningEffort") ?? "") ?? .medium
@@ -63,6 +68,8 @@ final class LlamaService {
         defer { isStarting = false }
         guard let model = selectedModel else { throw AgentError.message("GGUF 모델이 없습니다.") }
         stop()
+        generation += 1
+        let myGeneration = generation
 
         let executable = ["/opt/homebrew/bin/llama-server", "/usr/local/bin/llama-server"]
             .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
@@ -79,16 +86,23 @@ final class LlamaService {
         if lowPowerMode { process.arguments?.append(contentsOf: ["--threads", "4", "--threads-batch", "4"]) }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
+        process.terminationHandler = { [weak self] proc in
+            guard proc.terminationStatus != 0 || proc.terminationReason == .uncaughtSignal else { return }
+            Task { @MainActor [weak self] in self?.handleUnexpectedExit(generation: myGeneration) }
+        }
         try process.run()
         self.process = process
         status = "모델 로딩 중"
 
         for _ in 0..<180 {
+            guard generation == myGeneration else { return }
             if !process.isRunning { throw AgentError.message("llama-server가 종료되었습니다.") }
             if let response = try? await URLSession.shared.data(from: baseURL.appending(path: "health")),
                (response.1 as? HTTPURLResponse)?.statusCode == 200 {
                 isRunning = true
                 status = "실행 중"
+                restartAttempts = 0
+                startHealthMonitor(generation: myGeneration)
                 return
             }
             try await Task.sleep(for: .seconds(1))
@@ -97,11 +111,63 @@ final class LlamaService {
     }
 
     func stop() {
+        generation += 1
+        healthMonitorTask?.cancel()
+        healthMonitorTask = nil
         stopGeneration()
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
         isRunning = false
         status = "중지됨"
+        restartAttempts = 0
+    }
+
+    /// Polls `/health` every 4s while the server should be running. Two consecutive
+    /// failures (~8s of unresponsiveness) are treated the same as a process crash.
+    private func startHealthMonitor(generation: Int) {
+        healthMonitorTask?.cancel()
+        healthMonitorTask = Task { [weak self] in
+            var consecutiveFailures = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(4))
+                guard let self, !Task.isCancelled, self.generation == generation else { return }
+                if self.isGenerating { consecutiveFailures = 0; continue }
+                let healthy = (try? await URLSession.shared.data(from: self.baseURL.appending(path: "health")))
+                    .map { ($0.1 as? HTTPURLResponse)?.statusCode == 200 } ?? false
+                if healthy { consecutiveFailures = 0; continue }
+                consecutiveFailures += 1
+                if consecutiveFailures >= 2 {
+                    self.handleUnexpectedExit(generation: generation)
+                    return
+                }
+            }
+        }
+    }
+
+    private func handleUnexpectedExit(generation: Int) {
+        guard generation == self.generation, isRunning || isStarting else { return }
+        healthMonitorTask?.cancel()
+        healthMonitorTask = nil
+        process = nil
+        isRunning = false
+        Task { await attemptRestart(generation: generation) }
+    }
+
+    private func attemptRestart(generation: Int) async {
+        guard generation == self.generation else { return }
+        guard restartAttempts < maxRestartAttempts else {
+            status = "모델 프로세스가 반복적으로 종료되어 자동 재시작을 중단했습니다"
+            onFatalError?("모델이 계속 예기치 않게 종료되어 자동 재시작을 멈췄습니다. 모델을 다시 시작해 주세요.")
+            return
+        }
+        restartAttempts += 1
+        status = "모델이 예기치 않게 종료되어 재시작 중 (\(restartAttempts)/\(maxRestartAttempts))"
+        let delay = min(pow(2.0, Double(restartAttempts)), 12)
+        try? await Task.sleep(for: .seconds(delay))
+        guard generation == self.generation else { return }
+        do { try await start() }
+        catch { onFatalError?(error.localizedDescription) }
     }
 
     func stopGeneration() {
@@ -115,7 +181,7 @@ final class LlamaService {
         let modelName = selectedModel?.name ?? "local"
         let modelIdentity = selectedModel?.identity ?? "the selected local model"
         var templateOptions: [String: Any] = ["enable_thinking": effort.usesThinking]
-        if effort.usesThinking, selectedModel?.isQwen38 == true {
+        if effort.usesThinking {
             templateOptions["reasoning_effort"] = effort.qwenReasoningEffort
         }
         let history = messages.flatMap { message -> [[String: Any]] in

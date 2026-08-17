@@ -169,11 +169,11 @@ enum ReasoningEffort: String, CaseIterable, Identifiable, Codable {
     var maxTokens: Int {
         switch self {
         case .feather: 512
-        case .light: 1_024
-        case .medium: 2_048
-        case .high: 4_096
-        case .extraHigh: 6_144
-        case .ultra: 8_192
+        case .light: 1_536
+        case .medium: 4_096
+        case .high: 8_192
+        case .extraHigh: 12_288
+        case .ultra: 16_384
         }
     }
     var usesThinking: Bool { self != .feather && self != .light }

@@ -7,6 +7,17 @@ extension Color {
     static let opiumPurpleMuted = opiumPurple.opacity(0.07)
 }
 
+/// A small type scale shared by the sidebar, message stream, inspector, and composer
+/// so panel-to-panel text doesn't drift to arbitrary point sizes.
+enum AppFont {
+    static let panelTitle = Font.system(size: 18, weight: .semibold)
+    static let heading = Font.system(size: 16, weight: .semibold)
+    static let body = Font.system(size: 15)
+    static let bodyEmphasis = Font.system(size: 15, weight: .medium)
+    static let caption = Font.system(size: 13)
+    static let mono = Font.system(size: 13, design: .monospaced)
+}
+
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var service: LlamaService?
     weak var resourceMonitor: ResourceMonitor?
@@ -153,7 +164,7 @@ struct ContentView: View {
                         .onDelete { offsets in model.store.delete(Set(offsets.map { model.store.threads[$0].id })) }
                 }
             }
-            .font(.system(size: 15))
+            .font(AppFont.body)
             .listStyle(.sidebar).scrollContentBackground(.hidden)
             Button { showingPlugins = true } label: {
                 HStack {
@@ -179,8 +190,8 @@ struct ContentView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.store.selected?.title ?? "새 작업").font(.system(size: 16, weight: .semibold)).lineLimit(1)
-                Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(1)
+                Text(model.store.selected?.title ?? "새 작업").font(AppFont.heading).lineLimit(1)
+                Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(AppFont.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -263,8 +274,6 @@ struct ContentView: View {
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }.onChange(of: model.store.selected?.messages.last?.content) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
-            }.onChange(of: model.store.selected?.messages.last?.reasoning) { _, _ in
-                proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }.onChange(of: model.inlineActivity?.id) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }.onChange(of: model.activeChangeStats) { _, _ in
@@ -315,10 +324,10 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(Color.opiumPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TextField("무엇이든 요청하세요", text: $model.input, axis: .vertical)
-                .font(.system(size: 17)).lineLimit(2...12).textFieldStyle(.plain)
-                .frame(minHeight: 76, alignment: .topLeading)
-                .onSubmit { Task { await model.send() } }
+            ComposerTextView(text: $model.input, placeholder: "무엇이든 요청하세요") {
+                Task { await model.send() }
+            }
+            .frame(minHeight: 76, maxHeight: 220, alignment: .topLeading)
             HStack {
                 Menu {
                     Button("파일 첨부", systemImage: "paperclip", action: model.chooseFiles)
@@ -466,6 +475,90 @@ private struct NewWorkView: View {
     }
 }
 
+/// Plain `TextField(axis: .vertical)` sends on every Return, so composing a multi-line
+/// prompt required awkward workarounds. This wraps an `NSTextView` directly: Return sends,
+/// Shift+Return inserts a newline.
+private final class ReturnAwareTextView: NSTextView {
+    var onReturn: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        let isReturnKey = event.keyCode == 36 || event.keyCode == 76
+        if isReturnKey, !event.modifierFlags.contains(.shift) {
+            onReturn?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+private struct ComposerTextView: NSViewRepresentable {
+    @Binding var text: String
+    let placeholder: String
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let textView = ReturnAwareTextView()
+        textView.delegate = context.coordinator
+        textView.onReturn = { context.coordinator.parent.onSubmit() }
+        textView.font = .systemFont(ofSize: 15)
+        textView.isRichText = false
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 2)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = text
+        textView.allowsUndo = true
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        context.coordinator.textView = textView
+        context.coordinator.placeholderField = makePlaceholder(in: scrollView)
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = context.coordinator.textView else { return }
+        textView.onReturn = { context.coordinator.parent.onSubmit() }
+        if textView.string != text { textView.string = text }
+        context.coordinator.placeholderField?.isHidden = !text.isEmpty
+    }
+
+    private func makePlaceholder(in scrollView: NSScrollView) -> NSTextField {
+        let field = NSTextField(labelWithString: placeholder)
+        field.font = .systemFont(ofSize: 15)
+        field.textColor = .placeholderTextColor
+        field.isHidden = !text.isEmpty
+        field.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(field)
+        NSLayoutConstraint.activate([
+            field.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 5),
+            field.topAnchor.constraint(equalTo: scrollView.topAnchor, constant: 3)
+        ])
+        return field
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ComposerTextView
+        weak var textView: ReturnAwareTextView?
+        weak var placeholderField: NSTextField?
+
+        init(_ parent: ComposerTextView) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+            placeholderField?.isHidden = !textView.string.isEmpty
+        }
+    }
+}
+
 private struct AgentQuestionCard: View {
     let question: AgentQuestion
     @Bindable var model: AgentViewModel
@@ -533,7 +626,7 @@ private struct ActivityInspector: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("보안 활동").font(.system(size: 18, weight: .semibold))
+                    Text("보안 활동").font(AppFont.panelTitle)
                 }
                 Spacer()
                 if model.llama.isGenerating { OpiumLoader() }
@@ -551,7 +644,7 @@ private struct ActivityInspector: View {
                                     .frame(width: 18)
                                 VStack(alignment: .leading, spacing: 3) {
                                     HStack(spacing: 6) {
-                                        Text(activity.title).font(.system(size: 16, weight: .medium))
+                                        Text(activity.title).font(AppFont.bodyEmphasis)
                                         if let level = activity.securityLevel {
                                             Text(level.title).font(.system(size: 11, weight: .semibold))
                                                 .foregroundStyle(securityColor(level))
@@ -709,7 +802,7 @@ private struct MessageView: View {
         if message.role == .tool { ToolMessageView(message: message) }
         else {
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
-                if message.content.isEmpty, let reasoning = message.reasoning, !reasoning.isEmpty {
+                if let reasoning = message.reasoning, !reasoning.isEmpty {
                     DisclosureGroup("생각 과정") { Text(reasoning).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption)
                 }
                 MarkdownMessageView(markdown: message.content.isEmpty ? " " : message.content)
@@ -755,7 +848,7 @@ private struct MessageView: View {
 
 private struct MarkdownMessageView: View {
     let markdown: String
-    private var blocks: [MarkdownBlock] { MarkdownBlock.parse(markdown) }
+    @State private var blocks: [MarkdownBlock] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -786,10 +879,14 @@ private struct MarkdownMessageView: View {
                     inline(text)
                 case .code(let language, let code):
                     CodeBlockView(language: language, code: code)
+                case .table(let header, let rows):
+                    MarkdownTableView(header: header, rows: rows)
                 }
             }
         }
         .font(.system(size: 15.5)).lineSpacing(5).textSelection(.enabled)
+        .onAppear { blocks = MarkdownBlock.parse(markdown) }
+        .onChange(of: markdown) { _, newValue in blocks = MarkdownBlock.parse(newValue) }
     }
 
     private func listCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -809,6 +906,7 @@ private struct MarkdownMessageView: View {
 
 enum MarkdownBlock {
     case heading(Int, String), bullets([String]), numbered([(Int, String)]), paragraph(String), code(String, String)
+    case table([String], [[String]])
 
     static func parse(_ source: String) -> [Self] {
         var result: [Self] = []
@@ -818,6 +916,7 @@ enum MarkdownBlock {
         var numbers: [(Int, String)] = []
         var language = ""
         var inCode = false
+        let lines = source.components(separatedBy: .newlines)
         func flushParagraph() {
             if !paragraph.isEmpty { result.append(.paragraph(paragraph.joined(separator: "\n"))); paragraph.removeAll() }
         }
@@ -825,29 +924,92 @@ enum MarkdownBlock {
             if !bullets.isEmpty { result.append(.bullets(bullets)); bullets.removeAll() }
             if !numbers.isEmpty { result.append(.numbered(numbers)); numbers.removeAll() }
         }
-        for line in source.components(separatedBy: .newlines) {
+        var index = 0
+        while index < lines.count {
+            let line = lines[index]
             if line.hasPrefix("```") {
                 if inCode { result.append(.code(language, code.joined(separator: "\n"))); code.removeAll() }
                 else { flushParagraph(); flushLists(); language = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces) }
-                inCode.toggle(); continue
+                inCode.toggle(); index += 1; continue
             }
-            if inCode { code.append(line); continue }
-            if line.trimmingCharacters(in: .whitespaces).isEmpty { flushParagraph(); flushLists(); continue }
+            if inCode { code.append(line); index += 1; continue }
+            if line.trimmingCharacters(in: .whitespaces).isEmpty { flushParagraph(); flushLists(); index += 1; continue }
+            if index + 1 < lines.count, let table = parseTable(header: line, separator: lines[index + 1], remaining: lines[(index + 2)...]) {
+                flushParagraph(); flushLists()
+                result.append(.table(table.header, table.rows))
+                index += 2 + table.rows.count
+                continue
+            }
             if let match = line.firstMatch(of: /^(#{1,6})\s+(.+)$/) {
-                flushParagraph(); flushLists(); result.append(.heading(match.1.count, String(match.2))); continue
+                flushParagraph(); flushLists(); result.append(.heading(match.1.count, String(match.2))); index += 1; continue
             }
             if let match = line.firstMatch(of: /^\s*[-*•]\s+(.+)$/) {
-                flushParagraph(); if !numbers.isEmpty { flushLists() }; bullets.append(String(match.1)); continue
+                flushParagraph(); if !numbers.isEmpty { flushLists() }; bullets.append(String(match.1)); index += 1; continue
             }
             if let match = line.firstMatch(of: /^\s*(\d+)\.\s+(.+)$/), let number = Int(match.1) {
-                flushParagraph(); if !bullets.isEmpty { flushLists() }; numbers.append((number, String(match.2))); continue
+                flushParagraph(); if !bullets.isEmpty { flushLists() }; numbers.append((number, String(match.2))); index += 1; continue
             }
             flushLists()
             paragraph.append(line)
+            index += 1
         }
         if inCode { result.append(.code(language, code.joined(separator: "\n"))) }
         flushParagraph(); flushLists()
         return result
+    }
+
+    private static func parseTable(header: String, separator: String, remaining: ArraySlice<String>) -> (header: [String], rows: [[String]])? {
+        func cells(_ line: String) -> [String] {
+            var trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("|") { trimmed.removeFirst() }
+            if trimmed.hasSuffix("|") { trimmed.removeLast() }
+            return trimmed.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        }
+        guard header.contains("|") else { return nil }
+        let separatorCells = cells(separator)
+        guard !separatorCells.isEmpty,
+              separatorCells.allSatisfy({ $0.trimmingCharacters(in: CharacterSet(charactersIn: ":- ")).isEmpty && $0.contains("-") })
+        else { return nil }
+        let headerCells = cells(header)
+        var rows: [[String]] = []
+        for line in remaining {
+            guard line.contains("|"), !line.trimmingCharacters(in: .whitespaces).isEmpty else { break }
+            rows.append(cells(line))
+        }
+        return (headerCells, rows)
+    }
+}
+
+private struct MarkdownTableView: View {
+    let header: [String]
+    let rows: [[String]]
+
+    var body: some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            GridRow {
+                ForEach(Array(header.enumerated()), id: \.offset) { _, cell in
+                    cellText(cell, weight: .semibold)
+                }
+            }
+            Divider().gridCellUnsizedAxes(.horizontal)
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                GridRow {
+                    ForEach(Array(header.indices), id: \.self) { column in
+                        cellText(column < row.count ? row[column] : "")
+                    }
+                }
+                if rowIndex < rows.count - 1 { Divider().gridCellUnsizedAxes(.horizontal) }
+            }
+        }
+        .font(.system(size: 13.5))
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.08)))
+    }
+
+    private func cellText(_ text: String, weight: Font.Weight = .regular) -> some View {
+        Text(text).fontWeight(weight).lineLimit(3)
+            .padding(.trailing, 18).padding(.vertical, 6)
     }
 }
 
