@@ -148,15 +148,20 @@ enum ComputerUse {
 
     // MARK: - Pixel-based control
 
+    /// Captures at exactly the display's point resolution — the same coordinate space
+    /// `click_at`/CGEvent use — so a coordinate the model reads off the image maps 1:1
+    /// onto the real screen. Downscaling the image to save tokens breaks that mapping
+    /// unless click_at also rescales, so this deliberately doesn't.
     private static func screenshot() async throws -> (String, String) {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else { throw AgentError.message("화면을 찾지 못했습니다.") }
+        let mainDisplayID = CGMainDisplayID()
+        guard let display = content.displays.first(where: { $0.displayID == mainDisplayID }) ?? content.displays.first else {
+            throw AgentError.message("화면을 찾지 못했습니다.")
+        }
         let filter = SCContentFilter(display: display, excludingWindows: [])
         let configuration = SCStreamConfiguration()
-        let maxWidth = 1_280
-        let scale = min(1, Double(maxWidth) / Double(display.width))
-        configuration.width = max(1, Int(Double(display.width) * scale))
-        configuration.height = max(1, Int(Double(display.height) * scale))
+        configuration.width = display.width
+        configuration.height = display.height
         configuration.showsCursor = true
 
         let cgImage: CGImage
@@ -169,7 +174,11 @@ enum ComputerUse {
         guard let png = bitmap.representation(using: .png, properties: [:]) else {
             throw AgentError.message("스크린샷을 인코딩하지 못했습니다.")
         }
-        return ("현재 화면을 캡처했습니다 (\(cgImage.width)x\(cgImage.height)).", png.base64EncodedString())
+        return (
+            "현재 화면을 캡처했습니다 (\(display.width)x\(display.height)). "
+                + "이미지 속 좌표는 click_at의 x, y와 동일한 좌표계입니다 — 그대로 사용하세요.",
+            png.base64EncodedString()
+        )
     }
 
     private static func clickAt(x: Double, y: Double) {
