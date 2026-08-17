@@ -58,6 +58,7 @@ struct ChatMessage: Identifiable, Codable, Hashable {
     var isProgress: Bool? = nil
     var changedFiles: [String]? = nil
     var changeStats: [FileChangeStat]? = nil
+    var imageBase64: String? = nil
     var createdAt = Date()
 
     static func visibleConversation(_ messages: [Self], condenseCurrentTurn: Bool) -> [Self] {
@@ -155,6 +156,18 @@ struct LocalModel: Identifiable, Hashable {
     }
     var isQwen38: Bool { name.lowercased().contains("qwen3.8") }
     var identity: String { isQwen38 ? "Qwen3.8" : name }
+
+    /// Companion mmproj file for vision-capable models downloaded through `ModelCatalog`,
+    /// resolved by matching this file's name against the catalog rather than guessing
+    /// from naming conventions, then confirming the sibling file is actually present.
+    var mmprojPath: String? {
+        guard let entry = ModelCatalog.all.first(where: { $0.filename == url.lastPathComponent }),
+              let mmproj = entry.mmproj else { return nil }
+        let candidate = url.deletingLastPathComponent().appending(path: mmproj.filename)
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate.path : nil
+    }
+
+    var isVisionCapable: Bool { mmprojPath != nil }
 }
 
 enum ReasoningEffort: String, CaseIterable, Identifiable, Codable {

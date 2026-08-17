@@ -86,7 +86,8 @@ final class AgentViewModel {
         var automaticCall: PendingToolCall?
         do {
             for try await event in llama.stream(messages: messages, workspacePath: store.selectedWorkspacePath,
-                                                pluginInstructions: plugins.enabledInstructions) {
+                                                pluginInstructions: plugins.enabledInstructions,
+                                                computerUseEnabled: permissions.computerUseEnabled) {
                 switch event {
                 case .text(let text):
                     stepProgress += text
@@ -262,8 +263,16 @@ final class AgentViewModel {
                                        symbol: activitySymbol(for: call.name), isActive: true)
         let changeStat = FileTools.changeStat(for: call, workspace: workspace)
         let result: String
-        do { result = try await Task.detached { try await FileTools.runAsync(call, workspace: workspace) }.value }
-        catch {
+        var resultImage: String?
+        do {
+            if ComputerUse.toolNames.contains(call.name) {
+                let outcome = try await ComputerUse.run(call)
+                result = outcome.text
+                resultImage = outcome.imageBase64
+            } else {
+                result = try await Task.detached { try await FileTools.runAsync(call, workspace: workspace) }.value
+            }
+        } catch {
             inlineActivity = nil
             completeToolActivity(activityID, outcome: "실패: \(error.localizedDescription)")
             throw error
@@ -280,7 +289,8 @@ final class AgentViewModel {
         completeToolActivity(activityID, outcome: result.components(separatedBy: .newlines).first)
         store.append(ChatMessage(role: .tool, content: "[\(call.name)]\n\(result)",
                                  reasoning: call.progress, metrics: call.metrics,
-                                 toolCallID: call.id, toolName: call.name, toolArguments: call.arguments))
+                                 toolCallID: call.id, toolName: call.name, toolArguments: call.arguments,
+                                 imageBase64: resultImage))
         await generate()
     }
 
@@ -312,7 +322,13 @@ final class AgentViewModel {
          "run_command": "변경 결과를 실행해 오류와 누락을 검증합니다.",
          "search_mail": "관련 메일을 찾아 필요한 내용을 확인합니다.",
          "fetch_url": "웹페이지 내용을 확인해 작업에 반영합니다.",
-         "web_search": "웹에서 관련 정보를 찾아 확인할 출처를 고릅니다."][tool] ?? "다음 작업에 필요한 정보를 확인합니다."
+         "web_search": "웹에서 관련 정보를 찾아 확인할 출처를 고릅니다.",
+         "list_ui_elements": "화면에 있는 클릭 가능한 요소를 확인합니다.",
+         "click_ui_element": "화면의 요소를 클릭해 다음 단계로 진행합니다.",
+         "take_screenshot": "현재 화면을 캡처해 상태를 확인합니다.",
+         "click_at": "지정한 좌표를 클릭합니다.",
+         "type_text": "필요한 텍스트를 입력합니다.",
+         "press_key": "키를 눌러 조작을 완료합니다."][tool] ?? "다음 작업에 필요한 정보를 확인합니다."
     }
 
     private func setActivity(_ title: String, detail: String? = nil, symbol: String, active: Bool) {
@@ -325,7 +341,9 @@ final class AgentViewModel {
         ["read_file": "doc.text", "list_files": "folder", "search_files": "magnifyingglass",
          "write_file": "square.and.pencil", "create_directory": "folder.badge.plus", "move_file": "arrow.right",
          "trash_file": "trash", "run_command": "terminal", "search_mail": "envelope", "fetch_url": "globe",
-         "web_search": "magnifyingglass.circle"][tool] ?? "wrench"
+         "web_search": "magnifyingglass.circle", "list_ui_elements": "rectangle.on.rectangle",
+         "click_ui_element": "cursorarrow.click", "take_screenshot": "camera.viewfinder",
+         "click_at": "cursorarrow.click.2", "type_text": "keyboard", "press_key": "keyboard.badge.ellipsis"][tool] ?? "wrench"
     }
 
     private func updateTitleIfNeeded() async {

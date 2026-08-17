@@ -1098,7 +1098,10 @@ private struct ToolMessageView: View {
             "[search_files]": "파일 검색", "[write_file]": "파일 수정",
             "[create_directory]": "폴더 생성", "[move_file]": "파일 이동",
             "[trash_file]": "휴지통으로 이동", "[run_command]": "명령 실행",
-            "[search_mail]": "메일 검색", "[fetch_url]": "웹페이지 확인", "[web_search]": "웹 검색"
+            "[search_mail]": "메일 검색", "[fetch_url]": "웹페이지 확인", "[web_search]": "웹 검색",
+            "[list_ui_elements]": "화면 요소 확인", "[click_ui_element]": "화면 클릭",
+            "[take_screenshot]": "화면 캡처", "[click_at]": "좌표 클릭",
+            "[type_text]": "텍스트 입력", "[press_key]": "키 입력"
         ][name] ?? "도구 실행"
     }
 }
@@ -1126,14 +1129,20 @@ private struct PermissionSettingsView: View {
     let modelName: String
     @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("권한 및 설정").font(.title2.weight(.semibold))
                     Text("사용량, 실행 권한, 연결된 도구를 관리합니다.").foregroundStyle(.secondary)
                 }
                 Spacer(); Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
+            }.padding(.bottom, 22)
+            ScrollView { settingsContent }
+        }.padding(26).frame(width: 600, height: 640)
+    }
+
+    private var settingsContent: some View {
+        VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 10) {
                 usageCard("지금까지 사용한 토큰", usage.promptTokens + usage.completionTokens)
             }
@@ -1174,7 +1183,46 @@ private struct PermissionSettingsView: View {
                 Label("Apple Mail", systemImage: "envelope").foregroundStyle(Color.opiumPurple.opacity(0.72))
                 Label("웹 읽기/제작", systemImage: "globe").foregroundStyle(Color.opiumPurple)
             }.font(.caption)
-        }.padding(26).frame(width: 600, height: 620)
+            computerUseSection
+        }
+    }
+
+    private var computerUseSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: $store.computerUseEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("컴퓨터 사용").foregroundStyle(.primary)
+                    Text("마우스 클릭, 키보드 입력, 화면 캡처를 모델이 사용할 수 있게 합니다. 항상 개별 승인이 필요합니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }.toggleStyle(.switch)
+            if store.computerUseEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    permissionRow(
+                        title: "접근성 권한", granted: ComputerUse.hasAccessibilityAccess,
+                        request: { ComputerUse.requestAccessibilityAccess() }
+                    )
+                    permissionRow(
+                        title: "화면 기록 권한", granted: ComputerUse.hasScreenRecordingAccess,
+                        request: { ComputerUse.requestScreenRecordingAccess() }
+                    )
+                    Text("화면 캡처는 비전 모델을 선택했을 때만 의미가 있습니다. 텍스트 전용 모델에서는 화면 요소 목록(list_ui_elements)만 활용됩니다.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }.padding(12).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+            }
+        }
+        .padding(14).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.orange.opacity(0.25)))
+    }
+
+    private func permissionRow(title: String, granted: Bool, request: @escaping () -> Void) -> some View {
+        HStack {
+            Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                .foregroundStyle(granted ? .green : .orange)
+            Text(title).font(.caption)
+            Spacer()
+            if !granted { Button("권한 요청", action: request).buttonStyle(.bordered).controlSize(.small) }
+        }
     }
 
     private func usageCard(_ title: String, _ value: Int) -> some View {

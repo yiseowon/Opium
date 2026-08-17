@@ -3,6 +3,7 @@ import Foundation
 
 enum FileTools {
     static func securityLevel(for call: PendingToolCall, workspace: String? = nil) -> SecurityLevel {
+        if ComputerUse.toolNames.contains(call.name) { return .critical }
         if call.name == "run_command" || call.name == "trash_file" { return .critical }
         if call.name == "search_mail" || call.name == "fetch_url" || call.name == "web_search" { return .sensitive }
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
@@ -37,6 +38,12 @@ enum FileTools {
         case "search_mail": return ("메일 검색", arguments["query"] ?? "최근 메일", "Apple Mail에서 읽기만 수행합니다.")
         case "fetch_url": return ("웹페이지 읽기", arguments["url"] ?? "웹", "페이지 내용을 읽고 변경하지 않습니다.")
         case "web_search": return ("웹 검색", arguments["query"] ?? "검색어", "공개 검색 결과의 제목과 주소를 읽습니다.")
+        case "list_ui_elements": return ("화면 요소 확인", arguments["app"] ?? "앱", "지정한 앱의 클릭 가능한 요소 목록을 읽습니다.")
+        case "click_ui_element": return ("화면 클릭", "\(arguments["app"] ?? "앱") · \(arguments["query"] ?? "")", "지정한 요소를 실제로 클릭합니다.")
+        case "take_screenshot": return ("화면 캡처", "전체 화면", "지금 화면을 캡처해 모델에게 보여줍니다.")
+        case "click_at": return ("좌표 클릭", "(\(arguments["x"] ?? "?"), \(arguments["y"] ?? "?"))", "화면의 정확한 좌표를 클릭합니다.")
+        case "type_text": return ("텍스트 입력", arguments["text"] ?? "", "현재 포커스에 텍스트를 입력합니다.")
+        case "press_key": return ("키 입력", arguments["key"] ?? "", "지정한 키를 누릅니다.")
         default: return (call.name, target.isEmpty ? call.arguments : target, "이 작업을 실행합니다.")
         }
     }
@@ -47,7 +54,10 @@ enum FileTools {
             return ["read_file": "파일 읽는 중", "list_files": "폴더 확인 중", "search_files": "파일 검색 중",
                     "write_file": "파일 수정 중", "create_directory": "폴더 생성 중", "move_file": "파일 이동 중",
                     "trash_file": "휴지통으로 이동 중", "search_mail": "메일 검색 중",
-                    "fetch_url": "웹페이지 확인 중", "web_search": "웹 검색 중"][call.name] ?? "도구 실행 중"
+                    "fetch_url": "웹페이지 확인 중", "web_search": "웹 검색 중",
+                    "list_ui_elements": "화면 요소 확인 중", "click_ui_element": "화면 클릭 중",
+                    "take_screenshot": "화면 캡처 중", "click_at": "좌표 클릭 중",
+                    "type_text": "텍스트 입력 중", "press_key": "키 입력 중"][call.name] ?? "도구 실행 중"
         }
 
         let command = (arguments["command"] ?? "").lowercased()

@@ -8,8 +8,14 @@ struct CatalogModel: Identifiable, Hashable {
     let minMemoryGB: Int
     let url: URL
     let filename: String
+    var mmproj: (url: URL, filename: String, sizeBytes: Int64)? = nil
 
-    var sizeGB: Double { Double(sizeBytes) / 1_073_741_824 }
+    var sizeGB: Double { Double(totalBytes) / 1_073_741_824 }
+    var totalBytes: Int64 { sizeBytes + (mmproj?.sizeBytes ?? 0) }
+    var isVisionCapable: Bool { mmproj != nil }
+
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
 }
 
 enum ModelCatalog {
@@ -50,12 +56,24 @@ enum ModelCatalog {
             quant: "Q4_K_M", sizeBytes: 42_520_398_400, minMemoryGB: 96,
             url: URL(string: "https://huggingface.co/bartowski/Meta-Llama-3.1-70B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf")!,
             filename: "Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf"
+        ),
+        CatalogModel(
+            id: "qwen2-vl-7b",
+            displayName: "Qwen2 VL 7B Instruct (비전)",
+            quant: "Q4_K_M", sizeBytes: 4_683_072_672, minMemoryGB: 20,
+            url: URL(string: "https://huggingface.co/bartowski/Qwen2-VL-7B-Instruct-GGUF/resolve/main/Qwen2-VL-7B-Instruct-Q4_K_M.gguf")!,
+            filename: "Qwen2-VL-7B-Instruct-Q4_K_M.gguf",
+            mmproj: (
+                url: URL(string: "https://huggingface.co/bartowski/Qwen2-VL-7B-Instruct-GGUF/resolve/main/mmproj-Qwen2-VL-7B-Instruct-f32.gguf")!,
+                filename: "mmproj-Qwen2-VL-7B-Instruct-f32.gguf",
+                sizeBytes: 2_703_066_624
+            )
         )
     ]
 
-    /// The largest model this device can comfortably run, by installed unified memory.
+    /// The largest general-purpose (non-vision) model this device can comfortably run.
     static func recommended(forMemoryGB memoryGB: Int) -> CatalogModel? {
-        all.filter { $0.minMemoryGB <= memoryGB }.max { $0.minMemoryGB < $1.minMemoryGB }
+        all.filter { $0.minMemoryGB <= memoryGB && !$0.isVisionCapable }.max { $0.minMemoryGB < $1.minMemoryGB }
     }
 }
 

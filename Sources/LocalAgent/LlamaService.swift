@@ -84,6 +84,7 @@ final class LlamaService {
             "--alias", model.name
         ]
         if lowPowerMode { process.arguments?.append(contentsOf: ["--threads", "4", "--threads-batch", "4"]) }
+        if let mmprojPath = model.mmprojPath { process.arguments?.append(contentsOf: ["--mmproj", mmprojPath]) }
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         process.terminationHandler = { [weak self] proc in
@@ -176,7 +177,7 @@ final class LlamaService {
     }
 
     func stream(messages: [ChatMessage], workspacePath: String,
-                pluginInstructions: String = "") -> AsyncThrowingStream<ModelEvent, Error> {
+                pluginInstructions: String = "", computerUseEnabled: Bool = false) -> AsyncThrowingStream<ModelEvent, Error> {
         let url = baseURL.appending(path: "v1/chat/completions")
         let modelName = selectedModel?.name ?? "local"
         let modelIdentity = selectedModel?.identity ?? "the selected local model"
@@ -191,12 +192,19 @@ final class LlamaService {
             }.joined()
             if message.role == .tool,
                let id = message.toolCallID, let name = message.toolName, let arguments = message.toolArguments {
-                return [
+                var turn: [[String: Any]] = [
                     ["role": "assistant", "content": message.reasoning ?? "", "tool_calls": [[
                         "id": id, "type": "function", "function": ["name": name, "arguments": arguments]
                     ]]],
                     ["role": "tool", "tool_call_id": id, "content": message.content]
                 ]
+                if let imageBase64 = message.imageBase64 {
+                    turn.append(["role": "user", "content": [
+                        ["type": "text", "text": "위 도구 결과로 캡처된 화면입니다."],
+                        ["type": "image_url", "image_url": ["url": "data:image/png;base64,\(imageBase64)"]]
+                    ]])
+                }
+                return turn
             }
             if message.role == .tool {
                 return [["role": "user", "content": "Tool result:\n\(message.content)"]]
@@ -251,7 +259,7 @@ final class LlamaService {
                             \(pluginInstructions.isEmpty ? "No plugins enabled." : pluginInstructions)
                             """
                         ]] + history,
-                        "tools": Self.toolsJSON,
+                        "tools": Self.toolsJSON(computerUseEnabled: computerUseEnabled),
                         "tool_choice": "auto",
                         "parallel_tool_calls": false,
                         "temperature": 0.1,
@@ -367,7 +375,30 @@ final class LlamaService {
         )
     }
 
-    private static let toolsJSON: [[String: Any]] = [
+    private static func toolsJSON(computerUseEnabled: Bool) -> [[String: Any]] {
+        baseToolsJSON + (computerUseEnabled ? computerUseToolsJSON : [])
+    }
+
+    private static let computerUseToolsJSON: [[String: Any]] = [
+        tool("list_ui_elements", "List clickable UI elements (buttons, links, menu items, checkboxes) in a running app's frontmost window. Requires accessibility permission.", [
+            "app": "Running app name, e.g. 'Safari' or 'Finder'"
+        ]),
+        tool("click_ui_element", "Click a UI element in a running app by matching its title text. Requires accessibility permission and user approval.", [
+            "app": "Running app name", "query": "Substring of the element's title to match"
+        ]),
+        tool("take_screenshot", "Capture the current screen as an image for visual inspection. Only useful with a vision-capable model. Requires screen recording permission.", [:]),
+        tool("click_at", "Click at exact screen pixel coordinates. Prefer click_ui_element when possible; use this only after a screenshot confirms the target. Requires user approval.", [
+            "x": "X coordinate in screen points", "y": "Y coordinate in screen points"
+        ]),
+        tool("type_text", "Type text at the current keyboard focus. Requires user approval.", [
+            "text": "Text to type"
+        ]),
+        tool("press_key", "Press a single named key: return, tab, space, delete, escape, left, right, up, down. Requires user approval.", [
+            "key": "Key name"
+        ])
+    ]
+
+    private static let baseToolsJSON: [[String: Any]] = [
         tool("ask_user", "Ask one concise multiple-choice question only when a user decision is required to continue.", [
             "question": "One short question", "detail": "Why this decision is needed", "options": "2 to 4 short options separated by |"
         ]),

@@ -31,15 +31,21 @@ enum ToolPolicy: String, CaseIterable, Codable, Identifiable {
 final class PermissionStore {
     var policy: ToolPolicy { didSet { save() } }
     var trustedFolders: [String] { didSet { save() } }
+    var computerUseEnabled: Bool { didSet { save() } }
 
     private let defaults = UserDefaults.standard
 
     init() {
         policy = ToolPolicy(rawValue: defaults.string(forKey: "toolPolicy") ?? "") ?? .safeReads
         trustedFolders = defaults.stringArray(forKey: "trustedFolders") ?? []
+        computerUseEnabled = defaults.bool(forKey: "computerUseEnabled")
     }
 
+    /// Computer-use tools always require an explicit tap, no matter the file-tool
+    /// policy — "전체 액세스" or a trusted folder never implies "allowed to click
+    /// around the screen".
     func allows(_ call: PendingToolCall, workspace: String? = nil) -> Bool {
+        guard !ComputerUse.toolNames.contains(call.name) else { return false }
         switch policy {
         case .askEveryTime:
             return false
@@ -90,5 +96,6 @@ final class PermissionStore {
     private func save() {
         defaults.set(policy.rawValue, forKey: "toolPolicy")
         defaults.set(trustedFolders, forKey: "trustedFolders")
+        defaults.set(computerUseEnabled, forKey: "computerUseEnabled")
     }
 }
