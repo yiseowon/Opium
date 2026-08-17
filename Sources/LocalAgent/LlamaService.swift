@@ -178,6 +178,7 @@ final class LlamaService {
 
     func stream(messages: [ChatMessage], workspacePath: String,
                 pluginInstructions: String = "", computerUseEnabled: Bool = false) -> AsyncThrowingStream<ModelEvent, Error> {
+        let visionCapable = selectedModel?.isVisionCapable ?? false
         let url = baseURL.appending(path: "v1/chat/completions")
         let modelName = selectedModel?.name ?? "local"
         let modelIdentity = selectedModel?.identity ?? "the selected local model"
@@ -259,7 +260,7 @@ final class LlamaService {
                             \(pluginInstructions.isEmpty ? "No plugins enabled." : pluginInstructions)
                             """
                         ]] + history,
-                        "tools": Self.toolsJSON(computerUseEnabled: computerUseEnabled),
+                        "tools": Self.toolsJSON(computerUseEnabled: computerUseEnabled, visionCapable: visionCapable),
                         "tool_choice": "auto",
                         "parallel_tool_calls": false,
                         "temperature": 0.1,
@@ -375,10 +376,12 @@ final class LlamaService {
         )
     }
 
-    private static func toolsJSON(computerUseEnabled: Bool) -> [[String: Any]] {
-        baseToolsJSON + (computerUseEnabled ? computerUseToolsJSON : [])
+    private static func toolsJSON(computerUseEnabled: Bool, visionCapable: Bool) -> [[String: Any]] {
+        guard computerUseEnabled else { return baseToolsJSON }
+        return baseToolsJSON + computerUseToolsJSON + (visionCapable ? visionToolsJSON : [])
     }
 
+    /// Usable without a vision model: AX reads/clicks by title, no need to "see" the screen.
     private static let computerUseToolsJSON: [[String: Any]] = [
         tool("list_ui_elements", "List clickable UI elements (buttons, links, menu items, checkboxes) in a running app's frontmost window. Requires accessibility permission.", [
             "app": "Running app name, e.g. 'Safari' or 'Finder'"
@@ -386,15 +389,21 @@ final class LlamaService {
         tool("click_ui_element", "Click a UI element in a running app by matching its title text. Requires accessibility permission and user approval.", [
             "app": "Running app name", "query": "Substring of the element's title to match"
         ]),
-        tool("take_screenshot", "Capture the current screen as an image for visual inspection. Only useful with a vision-capable model. Requires screen recording permission.", [:]),
-        tool("click_at", "Click at exact screen pixel coordinates. Prefer click_ui_element when possible; use this only after a screenshot confirms the target. Requires user approval.", [
-            "x": "X coordinate in screen points", "y": "Y coordinate in screen points"
-        ]),
         tool("type_text", "Type text at the current keyboard focus. Requires user approval.", [
             "text": "Text to type"
         ]),
         tool("press_key", "Press a single named key: return, tab, space, delete, escape, left, right, up, down. Requires user approval.", [
             "key": "Key name"
+        ])
+    ]
+
+    /// Only offered when the loaded model can actually see the resulting image — otherwise
+    /// the screenshot gets stuffed into a multimodal message a text-only model can't parse,
+    /// and it burns its whole budget on that instead of producing any visible answer.
+    private static let visionToolsJSON: [[String: Any]] = [
+        tool("take_screenshot", "Capture the current screen as an image for visual inspection. Requires screen recording permission.", [:]),
+        tool("click_at", "Click at exact screen pixel coordinates. Prefer click_ui_element when possible; use this only after a screenshot confirms the target. Requires user approval.", [
+            "x": "X coordinate in screen points", "y": "Y coordinate in screen points"
         ])
     ]
 
