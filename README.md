@@ -33,6 +33,15 @@ Ollama나 LM Studio처럼 모델을 사용자의 컴퓨터에서 실행하지만
 
 LangChain, LangGraph, OpenAI Agents SDK는 사용하지 않습니다. 모델 요청 → 도구 호출 → 권한 검사 → 실행 → 결과 반환을 반복하는 하네스를 Swift로 직접 구현했습니다.
 
+## 2026-08-17 업데이트
+
+- `llama-server` 프로세스 감시: 크래시 즉시 감지 + 헬스체크, 자동 재시작
+- 기기 사양 기반 모델 추천 + 인앱 다운로드, Hugging Face 실시간 검색
+- **컴퓨터 사용**: 접근성 API 기반 화면 요소 클릭/읽기, 비전 모델과 함께 쓰는 스크린샷 기반 좌표 클릭 — 항상 개별 승인 필요, 기본 꺼짐
+- 도구 실행 실패 시 대화가 깨지던 버그, 입력창 크기/폰트 통일, 마크다운 표 렌더링 등 다수 버그 수정
+
+자세한 커밋별 기록과 아직 안 된 것, Claude가 자체 판단으로 결정한 부분은 [`docs/2026-08-17-devlog.md`](docs/2026-08-17-devlog.md)에 정리했습니다.
+
 ## 다운로드
 
 ### [Opium 0.2.0 Preview for Apple Silicon 다운로드](https://github.com/yiseowon/Opium/releases/download/v0.2.0-preview/Opium-macOS-arm64.zip)
