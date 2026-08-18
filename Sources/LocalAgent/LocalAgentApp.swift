@@ -345,7 +345,8 @@ struct ContentView: View {
             .overlay(alignment: .topLeading) {
                 if model.input.isEmpty {
                     Text("무엇이든 요청하세요").foregroundStyle(.secondary).font(AppFont.body)
-                        .padding(.top, 2).allowsHitTesting(false)
+                        .padding(.leading, ComposerMetrics.placeholderInset).padding(.top, 3)
+                        .allowsHitTesting(false)
                 }
             }
             HStack {
@@ -495,6 +496,13 @@ private struct NewWorkView: View {
     }
 }
 
+enum ComposerMetrics {
+    /// Left inset of the text itself. The caret sits at this x, so the placeholder is
+    /// drawn a couple points further right to keep the two from overlapping.
+    static let textInset: CGFloat = 4
+    static let placeholderInset: CGFloat = textInset + 3
+}
+
 /// Plain `TextField(axis: .vertical)` sends on every Return, so composing a multi-line
 /// prompt required awkward workarounds. This wraps an `NSTextView` directly: Return sends,
 /// Shift+Return inserts a newline.
@@ -527,7 +535,10 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.font = .systemFont(ofSize: 15)
         textView.isRichText = false
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 0, height: 2)
+        // A zero-width inset puts the caret at x=0, right on top of the first glyph of
+        // the SwiftUI placeholder drawn at the same origin. The inset gives the caret
+        // its own column; the placeholder is offset past it in `composer`.
+        textView.textContainerInset = NSSize(width: ComposerMetrics.textInset, height: 3)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
