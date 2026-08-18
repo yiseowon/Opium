@@ -542,6 +542,10 @@ private struct ComposerTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.textContainer?.widthTracksTextView = true
+        // NSTextContainer adds 5pt of lineFragmentPadding by default, so text actually
+        // begins at inset + 5 — which put the caret past the placeholder's origin and
+        // dropped it inside the first glyph. Zeroing it makes the inset the true origin.
+        textView.textContainer?.lineFragmentPadding = 0
         textView.string = text
         textView.allowsUndo = true
 
