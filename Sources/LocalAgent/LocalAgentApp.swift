@@ -7,30 +7,23 @@ extension Color {
     static let opiumPurpleMuted = opiumPurple.opacity(0.07)
 }
 
-/// One type scale for the whole app, set in Nanum Myeongjo. Sizes step 22 / 18 / 16 /
-/// 14 / 13 / 12 so a heading reads as a heading — the previous 16-vs-15 gap was too
-/// small to register.
+/// One type scale for the whole app. Sizes step 21 / 17 / 15 / 13 / 12 / 11 so a
+/// heading reads as a heading — the previous 16-vs-15 gap was too small to register.
 ///
-/// `Font.system(design: .rounded)` was the earlier attempt at giving the app a voice,
-/// but SF Rounded carries no Hangul, so Korean text silently fell back to the stock
-/// gothic and nothing appeared to change. Naming the family directly is what actually
-/// takes effect. Sizes run a little larger than their sans equivalents because
-/// Myeongjo's strokes are lighter; code and figures stay monospaced.
+/// Deliberately the system font: a Nanum Myeongjo pass was tried and reverted, and
+/// `design: .rounded` is pointless here because SF Rounded carries no Hangul, so
+/// Korean silently falls back to the stock gothic anyway.
 enum AppFont {
-    private static let regular = "NanumMyeongjo"
-    private static let bold = "NanumMyeongjoBold"
-    private static let extraBold = "NanumMyeongjoExtraBold"
-
-    static let display = Font.custom(extraBold, size: 22)
-    static let panelTitle = Font.custom(bold, size: 18)
-    static let heading = Font.custom(bold, size: 16)
-    static let body = Font.custom(regular, size: 16)
-    static let bodyEmphasis = Font.custom(bold, size: 16)
-    static let secondary = Font.custom(regular, size: 14)
-    static let secondaryEmphasis = Font.custom(bold, size: 14)
-    static let caption = Font.custom(regular, size: 13)
-    static let captionEmphasis = Font.custom(bold, size: 13)
-    static let micro = Font.custom(bold, size: 12)
+    static let display = Font.system(size: 21, weight: .semibold)
+    static let panelTitle = Font.system(size: 17, weight: .semibold)
+    static let heading = Font.system(size: 15, weight: .semibold)
+    static let body = Font.system(size: 15)
+    static let bodyEmphasis = Font.system(size: 15, weight: .medium)
+    static let secondary = Font.system(size: 13)
+    static let secondaryEmphasis = Font.system(size: 13, weight: .medium)
+    static let caption = Font.system(size: 12)
+    static let captionEmphasis = Font.system(size: 12, weight: .medium)
+    static let micro = Font.system(size: 11, weight: .semibold)
     static let mono = Font.system(size: 13, design: .monospaced)
     static let monoCaption = Font.system(size: 12, design: .monospaced)
 }
