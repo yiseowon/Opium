@@ -7,20 +7,30 @@ extension Color {
     static let opiumPurpleMuted = opiumPurple.opacity(0.07)
 }
 
-/// One type scale for the whole app. Sizes step 21 / 17 / 15 / 13 / 12 / 11 so a
-/// heading reads as a heading — the previous 16-vs-15 gap was too small to register —
-/// and titles pick up `.rounded` to match the soft purple palette.
+/// One type scale for the whole app, set in Nanum Myeongjo. Sizes step 22 / 18 / 16 /
+/// 14 / 13 / 12 so a heading reads as a heading — the previous 16-vs-15 gap was too
+/// small to register.
+///
+/// `Font.system(design: .rounded)` was the earlier attempt at giving the app a voice,
+/// but SF Rounded carries no Hangul, so Korean text silently fell back to the stock
+/// gothic and nothing appeared to change. Naming the family directly is what actually
+/// takes effect. Sizes run a little larger than their sans equivalents because
+/// Myeongjo's strokes are lighter; code and figures stay monospaced.
 enum AppFont {
-    static let display = Font.system(size: 21, weight: .semibold, design: .rounded)
-    static let panelTitle = Font.system(size: 17, weight: .semibold, design: .rounded)
-    static let heading = Font.system(size: 15, weight: .semibold)
-    static let body = Font.system(size: 15)
-    static let bodyEmphasis = Font.system(size: 15, weight: .medium)
-    static let secondary = Font.system(size: 13)
-    static let secondaryEmphasis = Font.system(size: 13, weight: .medium)
-    static let caption = Font.system(size: 12)
-    static let captionEmphasis = Font.system(size: 12, weight: .medium)
-    static let micro = Font.system(size: 11, weight: .semibold)
+    private static let regular = "NanumMyeongjo"
+    private static let bold = "NanumMyeongjoBold"
+    private static let extraBold = "NanumMyeongjoExtraBold"
+
+    static let display = Font.custom(extraBold, size: 22)
+    static let panelTitle = Font.custom(bold, size: 18)
+    static let heading = Font.custom(bold, size: 16)
+    static let body = Font.custom(regular, size: 16)
+    static let bodyEmphasis = Font.custom(bold, size: 16)
+    static let secondary = Font.custom(regular, size: 14)
+    static let secondaryEmphasis = Font.custom(bold, size: 14)
+    static let caption = Font.custom(regular, size: 13)
+    static let captionEmphasis = Font.custom(bold, size: 13)
+    static let micro = Font.custom(bold, size: 12)
     static let mono = Font.system(size: 13, design: .monospaced)
     static let monoCaption = Font.system(size: 12, design: .monospaced)
 }
@@ -68,51 +78,28 @@ extension View {
     }
 }
 
-/// Shared chrome for every sheet: one header layout, one size, one scroll behaviour.
-/// Each sheet used to hand-roll its own header and pick its own fixed height, which is
-/// why they never quite matched and why content could be cut off with no way to reach it.
-private struct OpiumSheet<Content: View, Actions: View>: View {
-    let title: String
-    var subtitle: String? = nil
-    var width: CGFloat = 620
-    var height: CGFloat = 640
-    /// Sheets whose body manages its own scrolling (tab views, lists) opt out.
-    var scrolls: Bool = true
-    @ViewBuilder var actions: () -> Actions
-    @ViewBuilder var content: () -> Content
+/// Settings, model management, and plugins were three unrelated sheets opened from three
+/// separate sidebar rows, so related settings lived in different windows with no way to
+/// move between them. They are now sections of one window.
+enum SettingsSection: String, CaseIterable, Identifiable {
+    case general = "권한 및 설정"
+    case models = "모델 관리"
+    case plugins = "플러그인"
 
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(alignment: .top, spacing: Theme.Space.md) {
-                VStack(alignment: .leading, spacing: Theme.Space.xs) {
-                    Text(title).font(AppFont.display)
-                    if let subtitle {
-                        Text(subtitle).font(AppFont.secondary).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer(minLength: 0)
-                actions()
-                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            .padding(Theme.Space.xl)
-            Divider().opacity(0.6)
-            if scrolls {
-                ScrollView { content().padding(Theme.Space.xl) }
-            } else {
-                content()
-            }
+    var id: Self { self }
+    var symbol: String {
+        switch self {
+        case .general: "slider.horizontal.3"
+        case .models: "arrow.down.circle"
+        case .plugins: "puzzlepiece.extension"
         }
-        .frame(width: width, height: height)
     }
-}
-
-extension OpiumSheet where Actions == EmptyView {
-    init(title: String, subtitle: String? = nil, width: CGFloat = 620, height: CGFloat = 640,
-         scrolls: Bool = true, @ViewBuilder content: @escaping () -> Content) {
-        self.init(title: title, subtitle: subtitle, width: width, height: height,
-                  scrolls: scrolls, actions: { EmptyView() }, content: content)
+    var subtitle: String {
+        switch self {
+        case .general: "사용량, 실행 권한, 연결된 도구를 관리합니다."
+        case .models: "\(DeviceCapability.current.chipName) · 메모리 \(DeviceCapability.current.memoryGB) GB"
+        case .plugins: "스킬과 도구를 하나의 번들로 설치하고 관리합니다."
+        }
     }
 }
 
@@ -152,9 +139,8 @@ extension OpiumSheet where Actions == EmptyView {
 
 struct ContentView: View {
     @Bindable var model: AgentViewModel
-    @State private var showingPermissions = false
-    @State private var showingPlugins = false
-    @State private var showingModelDownloads = false
+    /// Non-nil while the settings window is open, carrying which section to show.
+    @State private var settingsSection: SettingsSection?
     @State private var composerHeight: CGFloat = 22
     @State private var sidebarVisible = true
     @State private var inspectorVisible = true
@@ -184,12 +170,9 @@ struct ContentView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .sheet(isPresented: $showingPermissions) {
-            PermissionSettingsView(store: model.permissions, usage: model.store.totalUsage,
-                                   modelName: model.llama.selectedModel?.name ?? "모델 없음")
+        .sheet(item: $settingsSection) { section in
+            SettingsWindow(model: model, section: section)
         }
-        .sheet(isPresented: $showingPlugins) { PluginDirectoryView(model: model) }
-        .sheet(isPresented: $showingModelDownloads) { ModelDownloadView(model: model) }
         .sheet(item: $newWorkKind) { kind in NewWorkView(kind: kind, store: model.store) }
         .alert("오류", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
             Button("확인", role: .cancel) {}
@@ -267,7 +250,7 @@ struct ContentView: View {
             }
             .font(AppFont.body)
             .listStyle(.sidebar).scrollContentBackground(.hidden)
-            Button { showingPlugins = true } label: {
+            Button { settingsSection = .plugins } label: {
                 HStack {
                     Image(systemName: "puzzlepiece.extension").frame(width: 18, alignment: .center)
                     Text("플러그인")
@@ -276,7 +259,7 @@ struct ContentView: View {
                         .font(AppFont.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }.contentShape(Rectangle()).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             }.buttonStyle(OpiumHoverButtonStyle())
-            Button { showingModelDownloads = true } label: {
+            Button { settingsSection = .models } label: {
                 HStack {
                     Image(systemName: "arrow.down.circle").frame(width: 18, alignment: .center)
                     Text("모델 관리")
@@ -284,8 +267,7 @@ struct ContentView: View {
                     Text("\(model.llama.models.count)").font(AppFont.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }.contentShape(Rectangle()).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             }.buttonStyle(OpiumHoverButtonStyle())
-            Divider().opacity(0.5)
-            Button { showingPermissions = true } label: {
+            Button { settingsSection = .general } label: {
                 HStack {
                     Image(systemName: "slider.horizontal.3").frame(width: 18, alignment: .center)
                     Text("권한 및 설정")
@@ -310,7 +292,7 @@ struct ContentView: View {
             .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
             .background(Theme.Surface.raised, in: Capsule())
             .animation(.easeInOut(duration: 0.2), value: model.llama.isRunning)
-            Button { showingPermissions = true } label: { Image(systemName: "gearshape") }
+            Button { settingsSection = .general } label: { Image(systemName: "gearshape") }
                 .buttonStyle(OpiumHoverButtonStyle(compact: true)).help("권한 및 설정")
         }.padding(.horizontal, Theme.Space.xl).frame(height: 56).background(.bar)
     }
@@ -469,7 +451,7 @@ struct ContentView: View {
                     Button("메일 찾아보기", systemImage: "envelope") { model.input = "Apple Mail에서 다음 메일을 찾아 요약해줘: " }
                     Button("웹사이트 만들기", systemImage: "globe") { model.input = "현재 작업 폴더에 다음 웹사이트를 완성하고 실행까지 확인해줘: " }
                 } label: { Image(systemName: "plus") }.menuStyle(.borderlessButton).help("도구 및 첨부")
-                Button { showingPermissions = true } label: {
+                Button { settingsSection = .general } label: {
                     Label(model.permissions.policy.title, systemImage: "shield.lefthalf.filled")
                         .foregroundStyle(model.permissions.policy == .fullAccess ? .orange : .secondary)
                 }.buttonStyle(.plain)
@@ -1304,17 +1286,88 @@ private struct MetricsView: View {
     }
 }
 
-private struct PermissionSettingsView: View {
-    @Bindable var store: PermissionStore
-    let usage: GenerationMetrics
-    let modelName: String
+private struct SettingsWindow: View {
+    @Bindable var model: AgentViewModel
+    @State var section: SettingsSection
+    @Environment(\.dismiss) private var dismiss
+
     var body: some View {
-        OpiumSheet(title: "권한 및 설정", subtitle: "사용량, 실행 권한, 연결된 도구를 관리합니다.") {
-            settingsContent
+        HStack(spacing: 0) {
+            sectionList
+            Divider()
+            VStack(spacing: 0) {
+                HStack(alignment: .top, spacing: Theme.Space.md) {
+                    VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                        Text(section.rawValue).font(AppFont.display)
+                        Text(section.subtitle).font(AppFont.secondary).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    if section == .plugins {
+                        Button("플러그인 추가", systemImage: "plus") { model.plugins.chooseAndInstall() }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
+                }
+                .padding(Theme.Space.xl)
+                Divider().opacity(0.6)
+                content
+            }
+        }
+        .frame(width: 800, height: 640)
+        .alert("오류", isPresented: Binding(
+            get: { model.plugins.errorMessage != nil || model.downloader.errorMessage != nil },
+            set: { if !$0 { model.plugins.errorMessage = nil; model.downloader.errorMessage = nil } })) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(model.plugins.errorMessage ?? model.downloader.errorMessage ?? "")
         }
     }
 
-    private var settingsContent: some View {
+    private var sectionList: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.xs) {
+            ForEach(SettingsSection.allCases) { item in
+                Button { section = item } label: {
+                    HStack(spacing: Theme.Space.md) {
+                        Image(systemName: item.symbol).frame(width: 18)
+                        Text(item.rawValue).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .font(AppFont.body)
+                    .foregroundStyle(section == item ? Color.opiumPurple : .primary)
+                    .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+                    .background(section == item ? Color.opiumPurpleSoft : .clear,
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.small))
+                    .contentShape(Rectangle())
+                }.buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(Theme.Space.md)
+        .frame(width: 190)
+        .background(Color(nsColor: .windowBackgroundColor).opacity(0.5))
+    }
+
+    @ViewBuilder private var content: some View {
+        switch section {
+        case .general:
+            ScrollView {
+                PermissionSettingsBody(store: model.permissions,
+                                       usage: model.store.totalUsage,
+                                       modelName: model.llama.selectedModel?.name ?? "모델 없음")
+                    .padding(Theme.Space.xl)
+            }
+        case .models: ModelManagementBody(model: model)
+        case .plugins: PluginDirectoryBody(model: model)
+        }
+    }
+}
+
+private struct PermissionSettingsBody: View {
+    @Bindable var store: PermissionStore
+    let usage: GenerationMetrics
+    let modelName: String
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             HStack(spacing: 10) {
                 usageCard("지금까지 사용한 토큰", usage.promptTokens + usage.completionTokens)
@@ -1372,7 +1425,7 @@ private struct PermissionSettingsView: View {
             if store.computerUseEnabled {
                 ComputerUsePermissionStatus()
                 Text("화면 캡처는 비전 모델을 선택했을 때만 의미가 있습니다. 텍스트 전용 모델에서는 화면 요소 목록(list_ui_elements)만 활용됩니다.")
-                    .font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
+                    .font(AppFont.caption).foregroundStyle(.secondary)
             }
         }
         .padding(Theme.Space.lg).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
@@ -1422,7 +1475,7 @@ private struct ComputerUsePermissionStatus: View {
     }
 }
 
-private struct ModelDownloadView: View {
+private struct ModelManagementBody: View {
     @Bindable var model: AgentViewModel
     @Environment(\.dismiss) private var dismiss
     private let device = DeviceCapability.current
@@ -1440,26 +1493,18 @@ private struct ModelDownloadView: View {
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
-        OpiumSheet(title: "모델 관리",
-                   subtitle: "\(device.chipName) · 메모리 \(device.memoryGB) GB",
-                   scrolls: false) {
-            VStack(spacing: 0) {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden()
-                .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
-                Divider().opacity(0.6)
-                switch tab {
-                case .featured: featuredList
-                case .search: searchTab
-                }
+        VStack(spacing: 0) {
+            Picker("", selection: $tab) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden()
+            .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
+            Divider().opacity(0.6)
+            switch tab {
+            case .featured: featuredList
+            case .search: searchTab
             }
         }
-        .alert("다운로드 오류", isPresented: Binding(get: { model.downloader.errorMessage != nil },
-            set: { if !$0 { model.downloader.errorMessage = nil } })) {
-            Button("확인", role: .cancel) {}
-        } message: { Text(model.downloader.errorMessage ?? "") }
     }
 
     // MARK: - Featured (curated catalog)
@@ -1606,7 +1651,7 @@ private struct ModelDownloadView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(result.id).font(AppFont.bodyEmphasis).lineLimit(1).truncationMode(.middle)
                         if let downloads = result.downloads {
-                            Text("다운로드 \(downloads.formatted())").font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
+                            Text("다운로드 \(downloads.formatted())").font(AppFont.caption).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
@@ -1638,7 +1683,7 @@ private struct ModelDownloadView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(file.path).font(AppFont.caption).lineLimit(1).truncationMode(.middle)
                 Text("\(String(format: "%.1f", file.sizeGB)) GB · 최소 메모리 \(file.estimatedMinMemoryGB) GB")
-                    .font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
+                    .font(AppFont.caption).foregroundStyle(.secondary)
             }
             Spacer()
             if let progress {
@@ -1650,27 +1695,11 @@ private struct ModelDownloadView: View {
     }
 }
 
-private struct PluginDirectoryView: View {
+private struct PluginDirectoryBody: View {
     @Bindable var model: AgentViewModel
     private var store: PluginStore { model.plugins }
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        OpiumSheet(title: "플러그인",
-                   subtitle: "스킬과 도구를 하나의 번들로 설치하고 관리합니다.",
-                   scrolls: false) {
-            Button("플러그인 추가", systemImage: "plus") { store.chooseAndInstall() }
-                .buttonStyle(.borderedProminent)
-        } content: {
-            pluginContent
-        }
-        .alert("플러그인 오류", isPresented: Binding(get: { store.errorMessage != nil },
-            set: { if !$0 { store.errorMessage = nil } })) {
-            Button("확인", role: .cancel) {}
-        } message: { Text(store.errorMessage ?? "") }
-    }
-
-    private var pluginContent: some View {
         Group {
             if store.plugins.isEmpty {
                 ContentUnavailableView {
