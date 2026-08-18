@@ -8,6 +8,18 @@ struct ChatThread: Identifiable, Codable, Hashable {
     var kind: WorkKind? = nil
     var schedule: WorkSchedule? = nil
     var updatedAt = Date()
+
+    /// What the sidebar shows. Falls back to the opening question whenever the thread
+    /// still carries a default name — threads created before auto-titling improved, and
+    /// ones where the title request failed, would otherwise be indistinguishable rows.
+    var displayTitle: String {
+        guard WorkKind.isPlaceholderTitle(title) else { return title }
+        let opening = messages.first { $0.role == .user }?.content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\n", with: " ")
+        guard let opening, !opening.isEmpty else { return title }
+        return String(opening.prefix(40))
+    }
 }
 
 enum WorkKind: String, CaseIterable, Codable, Hashable, Identifiable {
@@ -28,6 +40,13 @@ enum WorkKind: String, CaseIterable, Codable, Hashable, Identifiable {
         case .recurring: "repeat"
         case .scheduled: "calendar.badge.clock"
         }
+    }
+
+    /// True while a thread still carries whatever default name it was created with,
+    /// meaning auto-titling may replace it. A name the user typed or that was already
+    /// generated is never a placeholder, so it is never overwritten.
+    static func isPlaceholderTitle(_ title: String) -> Bool {
+        allCases.contains { $0.title == title }
     }
 }
 

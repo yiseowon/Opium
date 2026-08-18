@@ -152,11 +152,11 @@ struct ContentView: View {
             List(selection: $model.store.selectedID) {
                 Section("최근 작업") {
                     ForEach(model.store.threads) { thread in
-                        Text(thread.title)
+                        Text(thread.displayTitle)
                             .lineLimit(1).tag(thread.id)
                             .contextMenu {
                                 Button("이름 변경", systemImage: "pencil") {
-                                    renameText = thread.title; renamingThread = thread
+                                    renameText = thread.displayTitle; renamingThread = thread
                                 }
                                 Button("Finder에서 작업 폴더 보기", systemImage: "folder") {
                                     if let path = thread.workspacePath {
@@ -204,7 +204,7 @@ struct ContentView: View {
     private var header: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.store.selected?.title ?? "새 작업").font(AppFont.heading).lineLimit(1)
+                Text(model.store.selected?.displayTitle ?? "새 작업").font(AppFont.heading).lineLimit(1)
                 Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(AppFont.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()

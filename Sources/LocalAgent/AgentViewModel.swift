@@ -354,11 +354,16 @@ final class AgentViewModel {
          "click_at": "cursorarrow.click.2", "type_text": "keyboard", "press_key": "keyboard.badge.ellipsis"][tool] ?? "wrench"
     }
 
+    /// Runs as soon as a thread has one complete exchange. Waiting for a second user
+    /// message (as this used to) meant one-shot threads — most of them — kept their
+    /// default name forever, leaving the sidebar a wall of identical "새 작업" rows.
     private func updateTitleIfNeeded() async {
         guard let thread = store.selected,
               let firstUser = thread.messages.first(where: { $0.role == .user }),
-              thread.title == "새 작업" || thread.title == String(firstUser.content.prefix(28)),
-              thread.messages.filter({ $0.role == .user }).count >= 2 else { return }
+              WorkKind.isPlaceholderTitle(thread.title)
+                  || thread.title == String(firstUser.content.prefix(28)),
+              thread.messages.contains(where: { $0.role == .assistant && !$0.content.isEmpty })
+        else { return }
         do {
             let title = try await llama.title(for: Array(thread.messages.prefix(8)))
             store.setTitle(title, for: thread.id)
