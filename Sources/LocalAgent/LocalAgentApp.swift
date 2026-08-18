@@ -321,14 +321,15 @@ struct ContentView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 if model.store.selected?.messages.isEmpty != false {
-                    VStack(spacing: 12) {
+                    VStack(spacing: Theme.Space.md) {
                         OpiumMark().stroke(Color.opiumPurple.opacity(0.72), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                            .frame(width: 34, height: 34)
+                            .frame(width: 38, height: 38)
                         Text("무엇을 함께 해볼까요?").font(AppFont.display)
-                        Text("대화하거나, 파일을 첨부하거나, Mac의 작업을 맡겨보세요.").foregroundStyle(.secondary)
+                        Text("대화하거나, 파일을 첨부하거나, Mac의 작업을 맡겨보세요.")
+                            .font(AppFont.body).foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, minHeight: 380)
                 } else {
-                    LazyVStack(alignment: .leading, spacing: 24) {
+                    LazyVStack(alignment: .leading, spacing: 28) {
                         ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
                             if index > 0, message.role == .user {
                                 Divider().opacity(0.45).padding(.vertical, Theme.Space.sm)
@@ -379,8 +380,8 @@ struct ContentView: View {
                         Color.clear.frame(height: 1).id("conversation-bottom")
                     }
                     .padding(.vertical, Theme.Space.xl)
-                    .frame(maxWidth: 1_020)
-                    .padding(.horizontal, 36)
+                    .frame(maxWidth: 760)
+                    .padding(.horizontal, 40)
                     .frame(maxWidth: .infinity)
                 }
             }
@@ -816,7 +817,16 @@ private struct ActivityInspector: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     if model.activities.isEmpty {
-                        Color.clear.frame(height: 1)
+                        VStack(spacing: Theme.Space.sm) {
+                            Image(systemName: "shield.lefthalf.filled")
+                                .font(AppFont.display).foregroundStyle(.tertiary)
+                            Text("아직 실행한 작업이 없습니다")
+                                .font(AppFont.secondary).foregroundStyle(.secondary)
+                            Text("파일·터미널·화면 작업이 여기에 기록됩니다")
+                                .font(AppFont.caption).foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 48).padding(.horizontal, Theme.Space.lg)
                     } else {
                         ForEach(model.activities.reversed()) { activity in
                             HStack(alignment: .top, spacing: 10) {
@@ -829,7 +839,7 @@ private struct ActivityInspector: View {
                                         if let level = activity.securityLevel {
                                             Text(level.title).font(AppFont.micro)
                                                 .foregroundStyle(securityColor(level))
-                                                .padding(.horizontal, Theme.Space.xs).padding(.vertical, Theme.Space.xs)
+                                                .padding(.horizontal, Theme.Space.sm).padding(.vertical, 2)
                                                 .background(securityColor(level).opacity(0.12), in: Capsule())
                                         }
                                     }
@@ -1032,7 +1042,7 @@ private struct MarkdownMessageView: View {
     @State private var blocks: [MarkdownBlock] = []
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let text):
@@ -1065,7 +1075,7 @@ private struct MarkdownMessageView: View {
                 }
             }
         }
-        .font(AppFont.body).lineSpacing(5).textSelection(.enabled)
+        .font(AppFont.body).lineSpacing(7).textSelection(.enabled)
         .onAppear { blocks = MarkdownBlock.parse(markdown) }
         .onChange(of: markdown) { _, newValue in blocks = MarkdownBlock.parse(newValue) }
     }
@@ -1528,10 +1538,24 @@ private struct ModelDownloadView: View {
                 Text(searchError).font(AppFont.caption).foregroundStyle(.orange).padding(.horizontal, Theme.Space.xl)
             }
 
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    ForEach(searchResults) { result in searchResultRow(result) }
-                }.padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.xl)
+            if searchResults.isEmpty && !isSearching {
+                VStack(spacing: Theme.Space.sm) {
+                    Image(systemName: query.isEmpty ? "magnifyingglass" : "questionmark.folder")
+                        .font(AppFont.display).foregroundStyle(.tertiary)
+                    Text(query.isEmpty ? "Hugging Face에서 GGUF 모델을 검색합니다" : "검색 결과가 없습니다")
+                        .font(AppFont.secondary).foregroundStyle(.secondary)
+                    if query.isEmpty {
+                        Text("예: qwen3.8, llama, gemma, mmproj")
+                            .font(AppFont.caption).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: Theme.Space.md) {
+                        ForEach(searchResults) { result in searchResultRow(result) }
+                    }.padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.xl)
+                }
             }
         }
     }
