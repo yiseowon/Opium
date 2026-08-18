@@ -73,6 +73,33 @@ enum ComputerUse {
         }
     }
 
+    /// A downscaled shot of the current screen for the approval card, plus where the
+    /// pending click would land in that image's coordinates. Approving a click from a
+    /// text description alone means trusting coordinates you cannot check.
+    static func approvalPreview(for call: PendingToolCall) async -> (image: NSImage, point: CGPoint?)? {
+        guard hasScreenRecordingAccess else { return nil }
+        guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+              let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) ?? content.displays.first
+        else { return nil }
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let configuration = SCStreamConfiguration()
+        let targetWidth = 480
+        let scale = min(1, Double(targetWidth) / Double(display.width))
+        configuration.width = max(1, Int(Double(display.width) * scale))
+        configuration.height = max(1, Int(Double(display.height) * scale))
+        configuration.showsCursor = false
+        guard let cgImage = try? await SCScreenshotManager.captureImage(contentFilter: filter,
+                                                                       configuration: configuration) else { return nil }
+
+        let image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        let arguments = decodedArguments(call.arguments)
+        guard call.name == "click_at", let x = Double(arguments["x"] ?? ""), let y = Double(arguments["y"] ?? "") else {
+            return (image, nil)
+        }
+        return (image, CGPoint(x: x * scale, y: y * scale))
+    }
+
     // MARK: - AXUIElement (structured control)
 
     private static let clickableRoles: Set<String> = [

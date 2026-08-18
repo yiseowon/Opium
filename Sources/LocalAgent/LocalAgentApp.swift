@@ -7,18 +7,113 @@ extension Color {
     static let opiumPurpleMuted = opiumPurple.opacity(0.07)
 }
 
-/// A small type scale shared by the sidebar, message stream, inspector, and composer
-/// so panel-to-panel text doesn't drift to arbitrary point sizes.
+/// One type scale for the whole app. Sizes step 21 / 17 / 15 / 13 / 12 / 11 so a
+/// heading reads as a heading — the previous 16-vs-15 gap was too small to register —
+/// and titles pick up `.rounded` to match the soft purple palette.
 enum AppFont {
-    static let panelTitle = Font.system(size: 18, weight: .semibold)
-    static let heading = Font.system(size: 16, weight: .semibold)
+    static let display = Font.system(size: 21, weight: .semibold, design: .rounded)
+    static let panelTitle = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let heading = Font.system(size: 15, weight: .semibold)
     static let body = Font.system(size: 15)
     static let bodyEmphasis = Font.system(size: 15, weight: .medium)
-    static let secondary = Font.system(size: 14)
-    static let secondaryEmphasis = Font.system(size: 14, weight: .medium)
-    static let caption = Font.system(size: 13)
-    static let mono = Font.system(size: 13, design: .monospaced)
+    static let secondary = Font.system(size: 13)
+    static let secondaryEmphasis = Font.system(size: 13, weight: .medium)
+    static let caption = Font.system(size: 12)
+    static let captionEmphasis = Font.system(size: 12, weight: .medium)
     static let micro = Font.system(size: 11, weight: .semibold)
+    static let mono = Font.system(size: 13, design: .monospaced)
+    static let monoCaption = Font.system(size: 12, design: .monospaced)
+}
+
+/// Shape, spacing, and surface tokens. Before this the app carried nine different
+/// corner radii, nine padding values, and twenty background opacities — several of
+/// them visually identical — which is what read as "not tidied up".
+enum Theme {
+    enum Radius {
+        /// Chips, badges, inline controls.
+        static let small: CGFloat = 8
+        /// Cards, list rows, grouped sections.
+        static let medium: CGFloat = 12
+        /// Composer, sheets, prominent containers.
+        static let large: CGFloat = 18
+    }
+
+    enum Space {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 24
+    }
+
+    /// Named fills, so "a faint card background" is one decision rather than a fresh
+    /// opacity guess at each call site.
+    enum Surface {
+        static let card = Color.primary.opacity(0.045)
+        static let raised = Color.primary.opacity(0.08)
+        static let hairline = Color.primary.opacity(0.09)
+        static let accentWash = Color.opiumPurple.opacity(0.09)
+        static let warningWash = Color.orange.opacity(0.09)
+        static let warningLine = Color.orange.opacity(0.24)
+    }
+}
+
+extension View {
+    /// Standard card treatment: fill plus hairline border at a shared radius.
+    func opiumCard(radius: CGFloat = Theme.Radius.medium,
+                   fill: Color = Theme.Surface.card,
+                   border: Color = Theme.Surface.hairline) -> some View {
+        background(fill, in: RoundedRectangle(cornerRadius: radius))
+            .overlay(RoundedRectangle(cornerRadius: radius).stroke(border))
+    }
+}
+
+/// Shared chrome for every sheet: one header layout, one size, one scroll behaviour.
+/// Each sheet used to hand-roll its own header and pick its own fixed height, which is
+/// why they never quite matched and why content could be cut off with no way to reach it.
+private struct OpiumSheet<Content: View, Actions: View>: View {
+    let title: String
+    var subtitle: String? = nil
+    var width: CGFloat = 620
+    var height: CGFloat = 640
+    /// Sheets whose body manages its own scrolling (tab views, lists) opt out.
+    var scrolls: Bool = true
+    @ViewBuilder var actions: () -> Actions
+    @ViewBuilder var content: () -> Content
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: Theme.Space.md) {
+                VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                    Text(title).font(AppFont.display)
+                    if let subtitle {
+                        Text(subtitle).font(AppFont.secondary).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 0)
+                actions()
+                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
+            }
+            .padding(Theme.Space.xl)
+            Divider().opacity(0.6)
+            if scrolls {
+                ScrollView { content().padding(Theme.Space.xl) }
+            } else {
+                content()
+            }
+        }
+        .frame(width: width, height: height)
+    }
+}
+
+extension OpiumSheet where Actions == EmptyView {
+    init(title: String, subtitle: String? = nil, width: CGFloat = 620, height: CGFloat = 640,
+         scrolls: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.init(title: title, subtitle: subtitle, width: width, height: height,
+                  scrolls: scrolls, actions: { EmptyView() }, content: content)
+    }
 }
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -131,10 +226,10 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 OpiumMark().stroke(.white, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
                     .frame(width: 19, height: 19).accessibilityHidden(true)
-                Text("Opium").font(.title3.weight(.semibold))
+                Text("Opium").font(AppFont.panelTitle)
                 Spacer()
             }
-            .padding(.horizontal, 16).padding(.top, 18).padding(.bottom, 12)
+            .padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.lg).padding(.bottom, Theme.Space.md)
             VStack(spacing: 3) {
                 ForEach(WorkKind.allCases) { kind in
                     Button {
@@ -142,13 +237,13 @@ struct ContentView: View {
                     } label: {
                         Label(kind.title, systemImage: kind.symbol)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 11).padding(.vertical, 7)
+                            .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
                     }
                     .buttonStyle(OpiumHoverButtonStyle())
                 }
             }
             .font(AppFont.bodyEmphasis)
-            .padding(5).background(Color.opiumPurpleMuted, in: RoundedRectangle(cornerRadius: 10)).padding(.horizontal, 10)
+            .padding(Theme.Space.xs).background(Color.opiumPurpleMuted, in: RoundedRectangle(cornerRadius: Theme.Radius.medium)).padding(.horizontal, Theme.Space.md)
             List(selection: $model.store.selectedID) {
                 Section("최근 작업") {
                     ForEach(model.store.threads) { thread in
@@ -178,16 +273,16 @@ struct ContentView: View {
                     Text("플러그인")
                     Spacer()
                     Text("\(model.plugins.plugins.filter(\.isEnabled).count)")
-                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
+                        .font(AppFont.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             }.buttonStyle(OpiumHoverButtonStyle())
             Button { showingModelDownloads = true } label: {
                 HStack {
                     Image(systemName: "arrow.down.circle").frame(width: 18, alignment: .center)
                     Text("모델 관리")
                     Spacer()
-                    Text("\(model.llama.models.count)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
-                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
+                    Text("\(model.llama.models.count)").font(AppFont.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             }.buttonStyle(OpiumHoverButtonStyle())
             Divider().opacity(0.5)
             Button { showingPermissions = true } label: {
@@ -195,26 +290,29 @@ struct ContentView: View {
                     Image(systemName: "slider.horizontal.3").frame(width: 18, alignment: .center)
                     Text("권한 및 설정")
                     Spacer()
-                    Text(model.permissions.policy.title).font(.caption).foregroundStyle(.secondary)
-                }.contentShape(Rectangle()).padding(.horizontal, 14).padding(.vertical, 11)
+                    Text(model.permissions.policy.title).font(AppFont.caption).foregroundStyle(.secondary)
+                }.contentShape(Rectangle()).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             }.buttonStyle(OpiumHoverButtonStyle())
         }.background(Color(nsColor: .windowBackgroundColor).opacity(0.68))
     }
 
     private var header: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: Theme.Space.md) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.store.selected?.displayTitle ?? "새 작업").font(AppFont.heading).lineLimit(1)
+                Text(model.store.selected?.displayTitle ?? "새 작업").font(AppFont.panelTitle).lineLimit(1)
                 Text(model.llama.selectedModel?.name ?? "모델을 선택하세요").font(AppFont.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            HStack(spacing: 6) {
+            HStack(spacing: Theme.Space.sm) {
                 Circle().fill(model.llama.isRunning ? .green : .secondary).frame(width: 7, height: 7)
-                Text(model.llama.status).font(.caption)
-            }.padding(.horizontal, 10).padding(.vertical, 6).background(.secondary.opacity(0.09), in: Capsule())
+                Text(model.llama.status).font(AppFont.caption)
+            }
+            .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+            .background(Theme.Surface.raised, in: Capsule())
+            .animation(.easeInOut(duration: 0.2), value: model.llama.isRunning)
             Button { showingPermissions = true } label: { Image(systemName: "gearshape") }
                 .buttonStyle(OpiumHoverButtonStyle(compact: true)).help("권한 및 설정")
-        }.padding(.horizontal, 24).frame(height: 56).background(.bar)
+        }.padding(.horizontal, Theme.Space.xl).frame(height: 56).background(.bar)
     }
 
     private var messages: some View {
@@ -226,16 +324,17 @@ struct ContentView: View {
                     VStack(spacing: 12) {
                         OpiumMark().stroke(Color.opiumPurple.opacity(0.72), style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
                             .frame(width: 34, height: 34)
-                        Text("무엇을 함께 해볼까요?").font(.title2.weight(.medium))
+                        Text("무엇을 함께 해볼까요?").font(AppFont.display)
                         Text("대화하거나, 파일을 첨부하거나, Mac의 작업을 맡겨보세요.").foregroundStyle(.secondary)
                     }.frame(maxWidth: .infinity, minHeight: 380)
                 } else {
                     LazyVStack(alignment: .leading, spacing: 24) {
                         ForEach(Array(visibleMessages.enumerated()), id: \.element.id) { index, message in
                             if index > 0, message.role == .user {
-                                Divider().opacity(0.45).padding(.vertical, 6)
+                                Divider().opacity(0.45).padding(.vertical, Theme.Space.sm)
                             }
                             MessageView(message: message).id(message.id)
+                                .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
                         if model.llama.isStarting {
                             HStack(spacing: 10) {
@@ -246,7 +345,7 @@ struct ContentView: View {
                                         .font(AppFont.caption).foregroundStyle(.secondary)
                                 }
                             }
-                            .padding(.vertical, 4)
+                            .padding(.vertical, Theme.Space.xs)
                             .transition(.opacity)
                         }
                         if let activity = model.inlineActivity {
@@ -279,12 +378,15 @@ struct ContentView: View {
                         }
                         Color.clear.frame(height: 1).id("conversation-bottom")
                     }
-                    .padding(.vertical, 28)
+                    .padding(.vertical, Theme.Space.xl)
                     .frame(maxWidth: 1_020)
                     .padding(.horizontal, 36)
                     .frame(maxWidth: .infinity)
                 }
-            }.onChange(of: model.store.selected?.messages.count) { _, _ in
+            }
+            .animation(.easeOut(duration: 0.22), value: model.store.selected?.messages.count)
+            .animation(.easeOut(duration: 0.22), value: model.inlineActivity?.id)
+            .onChange(of: model.store.selected?.messages.count) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
             }.onChange(of: model.store.selected?.messages.last?.content) { _, _ in
                 proxy.scrollTo("conversation-bottom", anchor: .bottom)
@@ -308,13 +410,24 @@ struct ContentView: View {
     private func approval(_ call: PendingToolCall) -> some View {
         let paths = FileTools.paths(in: call)
         let presentation = FileTools.presentation(for: call)
-        return HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "shield.lefthalf.filled").font(.title2).foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 8) {
-                Text(presentation.title).font(.headline)
-                Text(presentation.target).font(.system(.caption, design: .monospaced))
+        let level = FileTools.securityLevel(for: call, workspace: model.store.selectedWorkspacePath)
+        return HStack(alignment: .top, spacing: Theme.Space.md) {
+            Image(systemName: "shield.lefthalf.filled").font(AppFont.panelTitle).foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                HStack(spacing: Theme.Space.sm) {
+                    Text(presentation.title).font(AppFont.heading)
+                    Text(level.title).font(AppFont.micro)
+                        .foregroundStyle(level == .critical ? .red : level == .sensitive ? .orange : .green)
+                        .padding(.horizontal, Theme.Space.sm).padding(.vertical, 2)
+                        .background((level == .critical ? Color.red : level == .sensitive ? .orange : .green)
+                            .opacity(0.12), in: Capsule())
+                }
+                Text(presentation.target).font(AppFont.monoCaption)
                     .foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-                Text(presentation.impact).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                Text(presentation.impact).font(AppFont.caption).foregroundStyle(.secondary).lineLimit(3)
+                if let preview = model.pendingPreview {
+                    ApprovalPreviewView(image: preview.image, point: preview.point)
+                }
                 HStack {
                     Button("거절", role: .cancel, action: model.reject)
                     Spacer()
@@ -325,9 +438,9 @@ struct ContentView: View {
                 }
             }
         }
-        .padding(15).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.orange.opacity(0.22)))
-        .frame(maxWidth: 760).padding(.horizontal, 24).padding(.bottom, 8)
+        .padding(Theme.Space.lg).background(Theme.Surface.warningWash, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.warningLine))
+        .frame(maxWidth: 760).padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.sm)
     }
 
     private var composer: some View {
@@ -335,7 +448,7 @@ struct ContentView: View {
             if !model.attachments.isEmpty { attachmentStrip }
             if model.hasQueuedFollowUp {
                 Label("현재 답변이 끝나면 이어서 전송합니다", systemImage: "text.append")
-                    .font(.caption).foregroundStyle(Color.opiumPurple)
+                    .font(AppFont.caption).foregroundStyle(Color.opiumPurple)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             ComposerTextView(text: $model.input, height: $composerHeight, minHeight: 22, maxHeight: 220) {
@@ -345,7 +458,7 @@ struct ContentView: View {
             .overlay(alignment: .topLeading) {
                 if model.input.isEmpty {
                     Text("무엇이든 요청하세요").foregroundStyle(.secondary).font(AppFont.body)
-                        .padding(.leading, ComposerMetrics.placeholderInset).padding(.top, 3)
+                        .padding(.leading, ComposerMetrics.placeholderInset).padding(.top, Theme.Space.xs)
                         .allowsHitTesting(false)
                 }
             }
@@ -389,14 +502,14 @@ struct ContentView: View {
                 if model.llama.isGenerating,
                    !model.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !model.attachments.isEmpty {
                     Button("다음에 보내기") { Task { await model.send() } }
-                        .buttonStyle(.plain).font(.caption.weight(.medium)).foregroundStyle(Color.opiumPurple)
+                        .buttonStyle(.plain).font(AppFont.captionEmphasis).foregroundStyle(Color.opiumPurple)
                 }
                 Button {
                     if model.llama.isGenerating { model.stopGeneration() }
                     else { Task { await model.send() } }
                 } label: {
                     if model.llama.isStarting { OpiumLoader() }
-                    else if model.llama.isGenerating { Image(systemName: "stop.fill").font(.system(size: 11, weight: .semibold)) }
+                    else if model.llama.isGenerating { Image(systemName: "stop.fill").font(AppFont.micro) }
                     else { Image(systemName: "arrow.up").fontWeight(.semibold) }
                 }
                     .buttonStyle(.borderedProminent).buttonBorderShape(.circle)
@@ -405,9 +518,9 @@ struct ContentView: View {
                               || model.llama.selectedModel == nil || model.llama.isStarting)
             }
         }
-        .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.primary.opacity(0.08)))
-        .shadow(color: .black.opacity(0.08), radius: 18, y: 6).frame(maxWidth: 880).padding(.horizontal, 24).padding(.bottom, 18)
+        .padding(Theme.Space.lg).background(.regularMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.large))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.large).stroke(Theme.Surface.hairline))
+        .shadow(color: .black.opacity(0.08), radius: 18, y: 6).frame(maxWidth: 880).padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.lg)
     }
 
     private var attachmentStrip: some View {
@@ -417,8 +530,8 @@ struct ContentView: View {
                     HStack(spacing: 6) {
                         Image(systemName: "doc.text"); Text(attachment.name).lineLimit(1)
                         Button { model.removeAttachment(attachment) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.buttonStyle(.plain)
-                    }.font(.caption).padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 9))
+                    }.font(AppFont.caption).padding(.horizontal, Theme.Space.sm).padding(.vertical, Theme.Space.sm)
+                        .background(Theme.Surface.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.small))
                 }
             }
         }
@@ -439,7 +552,7 @@ private struct OpiumHoverButtonStyle: ButtonStyle {
             configuration.label
                 .padding(compact ? 7 : 0)
                 .background(Color.opiumPurple.opacity(hovering ? 0.12 : configuration.isPressed ? 0.18 : 0),
-                            in: RoundedRectangle(cornerRadius: 8))
+                            in: RoundedRectangle(cornerRadius: Theme.Radius.small))
                 .scaleEffect(configuration.isPressed ? 0.97 : 1)
                 .animation(.easeOut(duration: 0.12), value: hovering)
                 .onHover { hovering = $0 }
@@ -456,8 +569,8 @@ private struct NewWorkView: View {
     @State private var date = Date().addingTimeInterval(3_600)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Label(kind.title, systemImage: kind.symbol).font(.title2.weight(.semibold))
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            Label(kind.title, systemImage: kind.symbol).font(AppFont.display)
             TextField("이름", text: $title).textFieldStyle(.roundedBorder)
             if kind == .project {
                 HStack {
@@ -471,7 +584,7 @@ private struct NewWorkView: View {
                 DatePicker(kind == .recurring ? "첫 실행" : "실행 시각", selection: $date)
                 if kind == .recurring {
                     Text("현재 프리뷰에서는 반복 계획을 저장합니다. 백그라운드 자동 실행은 앱이 실행 중일 때만 제공될 예정입니다.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.caption).foregroundStyle(.secondary)
                 }
             }
             Spacer()
@@ -486,7 +599,7 @@ private struct NewWorkView: View {
                     dismiss()
                 }.buttonStyle(.borderedProminent).tint(.opiumPurple).keyboardShortcut(.defaultAction)
             }
-        }.padding(24).frame(width: 480, height: 300)
+        }.padding(Theme.Space.xl).frame(width: 480, height: 340)
     }
 
     private func chooseFolder() {
@@ -596,6 +709,37 @@ private struct ComposerTextView: NSViewRepresentable {
     }
 }
 
+/// Screen preview for a pending computer-use approval, with a crosshair on the exact
+/// pixel the agent intends to click.
+private struct ApprovalPreviewView: View {
+    let image: NSImage
+    let point: CGPoint?
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable().scaledToFit()
+            .frame(maxWidth: 420, maxHeight: 240)
+            .overlay(alignment: .topLeading) { marker }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.small))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.small).stroke(Theme.Surface.hairline))
+    }
+
+    @ViewBuilder private var marker: some View {
+        if let point {
+            GeometryReader { geometry in
+                // The preview is captured at a known width, then scaled again to fit the
+                // card, so the marker rides the displayed size rather than raw pixels.
+                let ratio = geometry.size.width / max(image.size.width, 1)
+                Circle()
+                    .strokeBorder(.red, lineWidth: 2)
+                    .background(Circle().fill(.red.opacity(0.25)))
+                    .frame(width: 18, height: 18)
+                    .position(x: point.x * ratio, y: point.y * ratio)
+            }
+        }
+    }
+}
+
 private struct AgentQuestionCard: View {
     let question: AgentQuestion
     @Bindable var model: AgentViewModel
@@ -604,10 +748,10 @@ private struct AgentQuestionCard: View {
             HStack(spacing: 9) {
                 OpiumMark().stroke(Color.opiumPurple, style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round))
                     .frame(width: 20, height: 20)
-                Text(question.question).font(.headline)
+                Text(question.question).font(AppFont.heading)
             }
             if let detail = question.detail, !detail.isEmpty {
-                Text(detail).font(.callout).foregroundStyle(.secondary)
+                Text(detail).font(AppFont.body).foregroundStyle(.secondary)
             }
             HStack(spacing: 8) {
                 ForEach(question.options, id: \.self) { option in
@@ -616,9 +760,9 @@ private struct AgentQuestionCard: View {
                 }
             }
         }
-        .padding(16).background(Color.opiumPurpleSoft, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.opiumPurple.opacity(0.24)))
-        .frame(maxWidth: 820, alignment: .leading).padding(.horizontal, 24).padding(.bottom, 8)
+        .padding(Theme.Space.lg).background(Color.opiumPurpleSoft, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Color.opiumPurple.opacity(0.24)))
+        .frame(maxWidth: 820, alignment: .leading).padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.sm)
     }
 }
 
@@ -667,7 +811,7 @@ private struct ActivityInspector: View {
                 }
                 Spacer()
                 if model.llama.isGenerating { OpiumLoader() }
-            }.padding(16)
+            }.padding(Theme.Space.lg)
             Divider().opacity(0.5)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -685,7 +829,7 @@ private struct ActivityInspector: View {
                                         if let level = activity.securityLevel {
                                             Text(level.title).font(AppFont.micro)
                                                 .foregroundStyle(securityColor(level))
-                                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                                .padding(.horizontal, Theme.Space.xs).padding(.vertical, Theme.Space.xs)
                                                 .background(securityColor(level).opacity(0.12), in: Capsule())
                                         }
                                     }
@@ -700,9 +844,9 @@ private struct ActivityInspector: View {
                                     Text(activity.date, style: .time).font(AppFont.caption).foregroundStyle(.tertiary)
                                 }
                                 Spacer(minLength: 0)
-                                if activity.isActive { Circle().fill(.green).frame(width: 6, height: 6).padding(.top, 5) }
+                                if activity.isActive { Circle().fill(.green).frame(width: 6, height: 6).padding(.top, Theme.Space.xs) }
                             }
-                            .padding(.horizontal, 16).padding(.vertical, 11)
+                            .padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
                             Divider().opacity(0.25).padding(.leading, 44)
                         }
                     }
@@ -731,7 +875,7 @@ private struct ResourcePanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("메모리").font(.headline)
+                Text("메모리").font(AppFont.heading)
                 Spacer()
                 Text("\(bytes(totalUsage)) / \(bytes(snapshot.physicalBytes))")
                     .font(AppFont.secondary).monospacedDigit().foregroundStyle(.secondary)
@@ -779,7 +923,7 @@ private struct ResourcePanel: View {
                 .disabled(model.llama.isGenerating)
             }
         }
-        .padding(16)
+        .padding(Theme.Space.lg)
     }
 
     private func utilization(_ title: String, _ value: Double?, _ color: Color) -> some View {
@@ -828,7 +972,7 @@ private struct MemoryGraph: View {
             }
             .stroke(Color.opiumPurple, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
         }
-        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 7))
+        .background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.small))
         .accessibilityLabel("시스템 메모리 사용량 그래프")
     }
 }
@@ -840,28 +984,28 @@ private struct MessageView: View {
         else {
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
                 if let reasoning = message.reasoning, !reasoning.isEmpty {
-                    DisclosureGroup("생각 과정") { Text(reasoning).foregroundStyle(.secondary).textSelection(.enabled) }.font(.caption)
+                    DisclosureGroup("생각 과정") { Text(reasoning).foregroundStyle(.secondary).textSelection(.enabled) }.font(AppFont.caption)
                 }
                 MarkdownMessageView(markdown: message.content.isEmpty ? " " : message.content)
                     .padding(.horizontal, message.role == .user ? 16 : 0)
                     .padding(.vertical, message.role == .user ? 13 : 0)
                     .background(message.role == .user ? Color.opiumPurple.opacity(0.17) : .clear,
-                                in: RoundedRectangle(cornerRadius: 16))
-                    .overlay(RoundedRectangle(cornerRadius: 16)
+                                in: RoundedRectangle(cornerRadius: Theme.Radius.large))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.large)
                         .stroke(message.role == .user ? Color.opiumPurple.opacity(0.28) : .clear))
                     .frame(maxWidth: message.role == .user ? 720 : .infinity,
                            alignment: message.role == .user ? .trailing : .leading)
                 if let attachments = message.attachments, !attachments.isEmpty {
-                    HStack { ForEach(attachments) { Label("\($0.name) · \($0.formattedSize)", systemImage: "doc.text").font(.caption) } }
+                    HStack { ForEach(attachments) { Label("\($0.name) · \($0.formattedSize)", systemImage: "doc.text").font(AppFont.caption) } }
                 }
                 if let files = message.changedFiles, !files.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Label("변경한 항목 \(files.count)개", systemImage: "checkmark.circle.fill")
-                            .font(.caption.weight(.semibold)).foregroundStyle(Color.opiumPurple)
+                            .font(AppFont.captionEmphasis).foregroundStyle(Color.opiumPurple)
                         if let stats = message.changeStats, !stats.isEmpty {
                             ForEach(stats) { stat in
                                 HStack {
-                                    Text(stat.path).font(.system(.caption2, design: .monospaced))
+                                    Text(stat.path).font(AppFont.monoCaption)
                                         .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                                     Spacer()
                                     ChangeCountView(stats: [stat], showsFileName: false)
@@ -869,13 +1013,13 @@ private struct MessageView: View {
                             }
                         } else {
                             ForEach(files, id: \.self) { path in
-                                Text(path).font(.system(.caption2, design: .monospaced))
+                                Text(path).font(AppFont.monoCaption)
                                     .foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                             }
                         }
                     }
-                    .padding(10).background(Color.opiumPurple.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.opiumPurple.opacity(0.16)))
+                    .padding(Theme.Space.md).background(Theme.Surface.accentWash, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Color.opiumPurple.opacity(0.16)))
                 }
             }
             .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
@@ -892,7 +1036,7 @@ private struct MarkdownMessageView: View {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 switch block {
                 case .heading(let level, let text):
-                    inline(text).font(.system(size: level == 1 ? 22 : level == 2 ? 19 : 17, weight: .semibold))
+                    inline(text).font(level == 1 ? AppFont.display : level == 2 ? AppFont.panelTitle : AppFont.heading)
                         .padding(.top, level == 1 ? 5 : 2)
                 case .bullets(let items):
                     listCard {
@@ -928,10 +1072,10 @@ private struct MarkdownMessageView: View {
 
     private func listCard<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 10, content: content)
-            .padding(.horizontal, 14).padding(.vertical, 12)
+            .padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 11))
-            .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.08)))
+            .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
     }
 
     private func inline(_ source: String) -> Text {
@@ -1039,14 +1183,14 @@ private struct MarkdownTableView: View {
             }
         }
         .font(AppFont.caption)
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: 11))
-        .overlay(RoundedRectangle(cornerRadius: 11).stroke(.primary.opacity(0.08)))
+        .padding(Theme.Space.md)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.82), in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
     }
 
     private func cellText(_ text: String, weight: Font.Weight = .regular) -> some View {
         Text(text).fontWeight(weight).lineLimit(3)
-            .padding(.trailing, 18).padding(.vertical, 6)
+            .padding(.trailing, Theme.Space.lg).padding(.vertical, Theme.Space.sm)
     }
 }
 
@@ -1058,7 +1202,7 @@ private struct CodeBlockView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text(language.isEmpty ? "코드" : language).font(.caption).foregroundStyle(.secondary)
+                Text(language.isEmpty ? "코드" : language).font(AppFont.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button {
                     NSPasteboard.general.clearContents()
@@ -1067,17 +1211,17 @@ private struct CodeBlockView: View {
                     Task { try? await Task.sleep(for: .seconds(1.4)); copied = false }
                 } label: {
                     Label(copied ? "복사됨" : "복사", systemImage: copied ? "checkmark" : "doc.on.doc")
-                }.buttonStyle(.plain).font(.caption)
+                }.buttonStyle(.plain).font(AppFont.caption)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(.secondary.opacity(0.08))
+            .padding(.horizontal, Theme.Space.md).padding(.vertical, Theme.Space.sm)
+            .background(Theme.Surface.raised)
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(code).font(AppFont.secondary).monospaced().lineSpacing(3)
-                    .textSelection(.enabled).padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled).padding(Theme.Space.md).frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.primary.opacity(0.1)))
+        .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
     }
 }
 
@@ -1100,7 +1244,7 @@ private struct ChangeCountView: View {
                 .animation(.snappy, value: stat.additions + stat.deletions)
             }
         }
-        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+        .font(AppFont.monoCaption.weight(.semibold))
     }
 }
 
@@ -1109,13 +1253,13 @@ private struct ToolMessageView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             DisclosureGroup {
-                Text(message.content).font(AppFont.mono).textSelection(.enabled).padding(.top, 8)
+                Text(message.content).font(AppFont.mono).textSelection(.enabled).padding(.top, Theme.Space.sm)
             } label: {
                 HStack(spacing: 8) {
-                    Label(toolTitle + " 완료", systemImage: "checkmark.circle").font(.caption.weight(.medium))
+                    Label(toolTitle + " 완료", systemImage: "checkmark.circle").font(AppFont.captionEmphasis)
                 }
             }
-        }.foregroundStyle(.secondary).padding(11).background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+        }.foregroundStyle(.secondary).padding(Theme.Space.md).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
     }
 
     private var toolTitle: String {
@@ -1137,7 +1281,7 @@ private struct MetricsView: View {
     let metrics: GenerationMetrics
     var body: some View {
         Text(metricText)
-            .font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+            .font(AppFont.monoCaption).foregroundStyle(.secondary)
             .help("총 \(metrics.promptTokens + metrics.completionTokens) 토큰")
     }
 
@@ -1154,18 +1298,10 @@ private struct PermissionSettingsView: View {
     @Bindable var store: PermissionStore
     let usage: GenerationMetrics
     let modelName: String
-    @Environment(\.dismiss) private var dismiss
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("권한 및 설정").font(.title2.weight(.semibold))
-                    Text("사용량, 실행 권한, 연결된 도구를 관리합니다.").foregroundStyle(.secondary)
-                }
-                Spacer(); Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
-            }.padding(.bottom, 22)
-            ScrollView { settingsContent }
-        }.padding(26).frame(width: 600, height: 640)
+        OpiumSheet(title: "권한 및 설정", subtitle: "사용량, 실행 권한, 연결된 도구를 관리합니다.") {
+            settingsContent
+        }
     }
 
     private var settingsContent: some View {
@@ -1173,9 +1309,9 @@ private struct PermissionSettingsView: View {
             HStack(spacing: 10) {
                 usageCard("지금까지 사용한 토큰", usage.promptTokens + usage.completionTokens)
             }
-            Text(modelName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(modelName).font(AppFont.caption).foregroundStyle(.secondary).lineLimit(1)
             VStack(alignment: .leading, spacing: 8) {
-                Text("실행 권한").font(.headline)
+                Text("실행 권한").font(AppFont.heading)
                 ForEach(ToolPolicy.allCases) { policy in
                     Button { store.policy = policy } label: {
                         HStack(spacing: 10) {
@@ -1183,7 +1319,7 @@ private struct PermissionSettingsView: View {
                                 .foregroundStyle(store.policy == policy ? Color.opiumPurple : .secondary)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(policy.title).foregroundStyle(.primary)
-                                Text(policy.detail).font(.caption).foregroundStyle(.secondary)
+                                Text(policy.detail).font(AppFont.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
                         }.contentShape(Rectangle())
@@ -1191,7 +1327,7 @@ private struct PermissionSettingsView: View {
                 }
             }
             VStack(alignment: .leading, spacing: 10) {
-                HStack { Text("신뢰하는 폴더").font(.headline); Spacer(); Button("폴더 추가", action: store.chooseFolder) }
+                HStack { Text("신뢰하는 폴더").font(AppFont.heading); Spacer(); Button("폴더 추가", action: store.chooseFolder) }
                 if store.trustedFolders.isEmpty {
                     Text("등록된 폴더가 없습니다. 변경 작업은 항상 확인을 요청합니다.")
                         .foregroundStyle(.secondary).frame(maxWidth: .infinity, minHeight: 80)
@@ -1201,7 +1337,7 @@ private struct PermissionSettingsView: View {
                             Image(systemName: "folder.fill").foregroundStyle(.secondary)
                             Text(path).lineLimit(1).truncationMode(.middle); Spacer()
                             Button { store.remove(path) } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).foregroundStyle(.secondary)
-                        }.padding(10).background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 9))
+                        }.padding(Theme.Space.md).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.small))
                     }
                 }
             }
@@ -1209,7 +1345,7 @@ private struct PermissionSettingsView: View {
                 Label("파일", systemImage: "folder").foregroundStyle(.green)
                 Label("Apple Mail", systemImage: "envelope").foregroundStyle(Color.opiumPurple.opacity(0.72))
                 Label("웹 읽기/제작", systemImage: "globe").foregroundStyle(Color.opiumPurple)
-            }.font(.caption)
+            }.font(AppFont.caption)
             computerUseSection
         }
     }
@@ -1220,25 +1356,25 @@ private struct PermissionSettingsView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("컴퓨터 사용").foregroundStyle(.primary)
                     Text("마우스 클릭, 키보드 입력, 화면 캡처를 모델이 사용할 수 있게 합니다. 항상 개별 승인이 필요합니다.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.caption).foregroundStyle(.secondary)
                 }
             }.toggleStyle(.switch)
             if store.computerUseEnabled {
                 ComputerUsePermissionStatus()
                 Text("화면 캡처는 비전 모델을 선택했을 때만 의미가 있습니다. 텍스트 전용 모델에서는 화면 요소 목록(list_ui_elements)만 활용됩니다.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
             }
         }
-        .padding(14).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.orange.opacity(0.25)))
+        .padding(Theme.Space.lg).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.warningLine))
     }
 
     private func usageCard(_ title: String, _ value: Int) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value.formatted()).font(.title3.monospacedDigit().weight(.semibold))
-        }.padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.secondary.opacity(0.07), in: RoundedRectangle(cornerRadius: 10))
+            Text(title).font(AppFont.caption).foregroundStyle(.secondary)
+            Text(value.formatted()).font(AppFont.panelTitle.monospacedDigit())
+        }.padding(Theme.Space.md).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
     }
 }
 
@@ -1255,7 +1391,7 @@ private struct ComputerUsePermissionStatus: View {
             permissionRow(title: "접근성 권한", granted: accessibilityGranted) { ComputerUse.requestAccessibilityAccess() }
             permissionRow(title: "화면 기록 권한", granted: screenRecordingGranted) { ComputerUse.requestScreenRecordingAccess() }
         }
-        .padding(12).background(.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .padding(Theme.Space.md).background(Theme.Surface.warningWash, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
         .task {
             while !Task.isCancelled {
                 accessibilityGranted = ComputerUse.hasAccessibilityAccess
@@ -1269,7 +1405,7 @@ private struct ComputerUsePermissionStatus: View {
         HStack {
             Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
                 .foregroundStyle(granted ? .green : .orange)
-            Text(title).font(.caption)
+            Text(title).font(AppFont.caption)
             Spacer()
             if !granted { Button("권한 요청", action: request).buttonStyle(.bordered).controlSize(.small) }
         }
@@ -1294,25 +1430,22 @@ private struct ModelDownloadView: View {
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("모델 관리").font(.title2.weight(.semibold))
-                    Text("\(device.chipName) · 메모리 \(device.memoryGB) GB").foregroundStyle(.secondary)
+        OpiumSheet(title: "모델 관리",
+                   subtitle: "\(device.chipName) · 메모리 \(device.memoryGB) GB",
+                   scrolls: false) {
+            VStack(spacing: 0) {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
                 }
-                Spacer()
-                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
-            }.padding(24)
-            Picker("", selection: $tab) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }.pickerStyle(.segmented).labelsHidden().padding(.horizontal, 24).padding(.bottom, 12)
-            Divider()
-            switch tab {
-            case .featured: featuredList
-            case .search: searchTab
+                .pickerStyle(.segmented).labelsHidden()
+                .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
+                Divider().opacity(0.6)
+                switch tab {
+                case .featured: featuredList
+                case .search: searchTab
+                }
             }
         }
-        .frame(width: 600, height: 620)
         .alert("다운로드 오류", isPresented: Binding(get: { model.downloader.errorMessage != nil },
             set: { if !$0 { model.downloader.errorMessage = nil } })) {
             Button("확인", role: .cancel) {}
@@ -1325,7 +1458,7 @@ private struct ModelDownloadView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(ModelCatalog.all) { item in modelRow(item) }
-            }.padding(20)
+            }.padding(Theme.Space.xl)
         }
     }
 
@@ -1340,17 +1473,17 @@ private struct ModelDownloadView: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 7) {
-                        Text(item.displayName).font(.headline)
+                        Text(item.displayName).font(AppFont.heading)
                         if item.id == recommendedID {
-                            Text("추천").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
-                                .padding(.horizontal, 6).padding(.vertical, 3)
+                            Text("추천").font(AppFont.micro).foregroundStyle(Color.opiumPurple)
+                                .padding(.horizontal, Theme.Space.sm).padding(.vertical, Theme.Space.xs)
                                 .background(Color.opiumPurple.opacity(0.12), in: Capsule())
                         }
                     }
                     Text("\(item.quant) · \(String(format: "%.1f", item.sizeGB)) GB · 최소 메모리 \(item.minMemoryGB) GB")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(AppFont.caption).foregroundStyle(.secondary)
                     if !fitsDevice {
-                        Text("이 기기 메모리로는 느리거나 불안정할 수 있어요").font(.caption).foregroundStyle(.orange)
+                        Text("이 기기 메모리로는 느리거나 불안정할 수 있어요").font(AppFont.caption).foregroundStyle(.orange)
                     }
                 }
                 Spacer()
@@ -1360,14 +1493,14 @@ private struct ModelDownloadView: View {
                 ProgressView(value: progress).tint(.opiumPurple)
             }
         }
-        .padding(14).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.07)))
+        .padding(Theme.Space.lg).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
     }
 
     private func actionButton(_ item: CatalogModel, installed: Bool, isDownloading: Bool) -> some View {
         Group {
             if installed {
-                Label("설치됨", systemImage: "checkmark.circle.fill").font(.caption.weight(.medium)).foregroundStyle(.green)
+                Label("설치됨", systemImage: "checkmark.circle.fill").font(AppFont.captionEmphasis).foregroundStyle(.green)
             } else if isDownloading {
                 Button("취소") { model.downloader.cancel(item) }.buttonStyle(.bordered).controlSize(.small)
             } else {
@@ -1387,18 +1520,18 @@ private struct ModelDownloadView: View {
                     .onSubmit { runSearch() }
                 if isSearching { ProgressView().controlSize(.small) }
             }
-            .padding(10).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
-            .padding([.horizontal, .top], 20).padding(.bottom, 12)
+            .padding(Theme.Space.md).background(Theme.Surface.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.small))
+            .padding([.horizontal, .top], 20).padding(.bottom, Theme.Space.md)
             .onChange(of: query) { _, _ in debounceSearch() }
 
             if let searchError {
-                Text(searchError).font(.caption).foregroundStyle(.orange).padding(.horizontal, 20)
+                Text(searchError).font(AppFont.caption).foregroundStyle(.orange).padding(.horizontal, Theme.Space.xl)
             }
 
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(searchResults) { result in searchResultRow(result) }
-                }.padding(.horizontal, 20).padding(.bottom, 20)
+                }.padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.xl)
             }
         }
     }
@@ -1447,14 +1580,14 @@ private struct ModelDownloadView: View {
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(result.id).font(.system(size: 14, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                        Text(result.id).font(AppFont.bodyEmphasis).lineLimit(1).truncationMode(.middle)
                         if let downloads = result.downloads {
-                            Text("다운로드 \(downloads.formatted())").font(.caption2).foregroundStyle(.secondary)
+                            Text("다운로드 \(downloads.formatted())").font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
                     Image(systemName: expandedRepo == result.id ? "chevron.up" : "chevron.down")
-                        .foregroundStyle(.secondary).font(.caption)
+                        .foregroundStyle(.secondary).font(AppFont.caption)
                 }
             }.buttonStyle(.plain)
 
@@ -1468,8 +1601,8 @@ private struct ModelDownloadView: View {
                 }
             }
         }
-        .padding(12).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.primary.opacity(0.07)))
+        .padding(Theme.Space.md).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
     }
 
     private func searchFileRow(repo: String, file: HFFile) -> some View {
@@ -1479,9 +1612,9 @@ private struct ModelDownloadView: View {
 
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(file.path).font(.caption).lineLimit(1).truncationMode(.middle)
+                Text(file.path).font(AppFont.caption).lineLimit(1).truncationMode(.middle)
                 Text("\(String(format: "%.1f", file.sizeGB)) GB · 최소 메모리 \(file.estimatedMinMemoryGB) GB")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(AppFont.micro.weight(.regular)).foregroundStyle(.secondary)
             }
             Spacer()
             if let progress {
@@ -1489,7 +1622,7 @@ private struct ModelDownloadView: View {
             }
             actionButton(catalogItem, installed: installed, isDownloading: progress != nil)
         }
-        .padding(.leading, 12).padding(.vertical, 4)
+        .padding(.leading, Theme.Space.md).padding(.vertical, Theme.Space.xs)
     }
 }
 
@@ -1499,18 +1632,22 @@ private struct PluginDirectoryView: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("플러그인").font(.title2.weight(.semibold))
-                    Text("스킬과 도구를 하나의 번들로 설치하고 관리합니다.").foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("플러그인 추가", systemImage: "plus") { store.chooseAndInstall() }
-                    .buttonStyle(.borderedProminent)
-                Button("완료") { dismiss() }.keyboardShortcut(.defaultAction)
-            }.padding(24)
-            Divider()
+        OpiumSheet(title: "플러그인",
+                   subtitle: "스킬과 도구를 하나의 번들로 설치하고 관리합니다.",
+                   scrolls: false) {
+            Button("플러그인 추가", systemImage: "plus") { store.chooseAndInstall() }
+                .buttonStyle(.borderedProminent)
+        } content: {
+            pluginContent
+        }
+        .alert("플러그인 오류", isPresented: Binding(get: { store.errorMessage != nil },
+            set: { if !$0 { store.errorMessage = nil } })) {
+            Button("확인", role: .cancel) {}
+        } message: { Text(store.errorMessage ?? "") }
+    }
+
+    private var pluginContent: some View {
+        Group {
             if store.plugins.isEmpty {
                 ContentUnavailableView {
                     Label("설치된 플러그인이 없습니다", systemImage: "puzzlepiece.extension")
@@ -1525,16 +1662,16 @@ private struct PluginDirectoryView: View {
                         ForEach(store.plugins) { plugin in
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack(alignment: .top, spacing: 12) {
-                                    RoundedRectangle(cornerRadius: 10).fill(Color.opiumPurple.opacity(0.14))
+                                    RoundedRectangle(cornerRadius: Theme.Radius.medium).fill(Color.opiumPurple.opacity(0.14))
                                         .overlay(Image(systemName: kitSymbol(plugin))
                                             .foregroundStyle(Color.opiumPurple))
                                         .frame(width: 44, height: 44)
                                     VStack(alignment: .leading, spacing: 4) {
                                         HStack(spacing: 7) {
-                                            Text(plugin.displayName).font(.headline)
+                                            Text(plugin.displayName).font(AppFont.heading)
                                             if plugin.isBuiltIn {
-                                                Text("Opium 제공").font(.caption2.weight(.semibold)).foregroundStyle(Color.opiumPurple)
-                                                    .padding(.horizontal, 6).padding(.vertical, 3)
+                                                Text("Opium 제공").font(AppFont.micro).foregroundStyle(Color.opiumPurple)
+                                                    .padding(.horizontal, Theme.Space.sm).padding(.vertical, Theme.Space.xs)
                                                     .background(Color.opiumPurple.opacity(0.12), in: Capsule())
                                             }
                                         }
@@ -1562,19 +1699,19 @@ private struct PluginDirectoryView: View {
                                 }
                                 if plugin.isBuiltIn {
                                     Label(kitNote(plugin), systemImage: plugin.manifest.name == "melatonin-kit" ? "leaf.fill" : "bolt.shield.fill")
-                                        .font(.caption).foregroundStyle(Color.opiumPurple)
+                                        .font(AppFont.caption).foregroundStyle(Color.opiumPurple)
                                 } else if plugin.hasMCP || plugin.hasHooks {
                                     Label("MCP와 Hooks는 현재 자동 실행되지 않습니다.", systemImage: "shield.lefthalf.filled")
-                                        .font(.caption).foregroundStyle(.orange)
+                                        .font(AppFont.caption).foregroundStyle(.orange)
                                 }
                             }
-                            .padding(16).background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.primary.opacity(0.07)))
+                            .padding(Theme.Space.lg).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+                            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.medium).stroke(Theme.Surface.hairline))
                         }
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("추천 MCP 연결").font(.headline)
+                            Text("추천 MCP 연결").font(AppFont.heading)
                             Text("인기 서비스를 위한 카탈로그입니다. 계정 연결과 실제 실행은 각 MCP 설치 후 활성화됩니다.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(AppFont.caption).foregroundStyle(.secondary)
                             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
                                 ForEach(Self.catalog) { item in
                                     HStack(spacing: 10) {
@@ -1586,11 +1723,11 @@ private struct PluginDirectoryView: View {
                                         .frame(width: 22, height: 22)
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(item.name).font(AppFont.secondaryEmphasis)
-                                            Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            Text(item.detail).font(AppFont.caption).foregroundStyle(.secondary).lineLimit(1)
                                         }
                                         Spacer()
                                         if store.isInstalled(item.id) {
-                                            Text("설치됨").font(.caption2.weight(.medium)).foregroundStyle(Color.opiumPurple)
+                                            Text("설치됨").font(AppFont.micro).foregroundStyle(Color.opiumPurple)
                                         } else {
                                             Button("설치") {
                                                 store.installFromCatalog(name: item.id, displayName: item.name,
@@ -1599,25 +1736,20 @@ private struct PluginDirectoryView: View {
                                             }.buttonStyle(.bordered).controlSize(.small).tint(.opiumPurple)
                                         }
                                     }
-                                    .padding(11).background(Color.opiumPurple.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+                                    .padding(Theme.Space.md).background(Theme.Surface.accentWash, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
                                 }
                             }
                         }
-                        .padding(16).background(.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 14))
-                    }.padding(20)
+                        .padding(Theme.Space.lg).background(Theme.Surface.card, in: RoundedRectangle(cornerRadius: Theme.Radius.medium))
+                    }.padding(Theme.Space.xl)
                 }
             }
         }
-        .frame(width: 720, height: 620)
-        .alert("플러그인 오류", isPresented: Binding(get: { store.errorMessage != nil },
-            set: { if !$0 { store.errorMessage = nil } })) {
-            Button("확인", role: .cancel) {}
-        } message: { Text(store.errorMessage ?? "") }
     }
 
     private func capability(_ title: String, active: Bool) -> some View {
-        Text(title).font(.caption2.weight(.medium)).foregroundStyle(active ? .primary : .tertiary)
-            .padding(.horizontal, 7).padding(.vertical, 4)
+        Text(title).font(AppFont.micro).foregroundStyle(active ? .primary : .tertiary)
+            .padding(.horizontal, Theme.Space.sm).padding(.vertical, Theme.Space.xs)
             .background(.secondary.opacity(active ? 0.12 : 0.05), in: Capsule())
     }
 

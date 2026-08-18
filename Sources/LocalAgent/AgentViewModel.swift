@@ -9,7 +9,12 @@ final class AgentViewModel {
     var permissions = PermissionStore()
     var input = ""
     var errorMessage: String?
-    var pendingCall: PendingToolCall?
+    var pendingCall: PendingToolCall? {
+        didSet { refreshApprovalPreview() }
+    }
+    /// Screenshot shown alongside a pending computer-use approval, with the click target
+    /// marked, so the action can be checked rather than taken on trust.
+    var pendingPreview: (image: NSImage, point: CGPoint?)?
     var pendingQuestion: AgentQuestion?
     var attachments: [MessageAttachment] = []
     var liveMetrics = GenerationMetrics()
@@ -182,6 +187,17 @@ final class AgentViewModel {
         if llama.isRunning && !llama.isGenerating {
             llama.stop()
             await startModel()
+        }
+    }
+
+    private func refreshApprovalPreview() {
+        pendingPreview = nil
+        guard let call = pendingCall, ComputerUse.toolNames.contains(call.name),
+              permissions.computerUseEnabled else { return }
+        Task { [call] in
+            let preview = await ComputerUse.approvalPreview(for: call)
+            guard pendingCall?.id == call.id else { return }
+            pendingPreview = preview
         }
     }
 
